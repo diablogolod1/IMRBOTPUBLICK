@@ -1,0 +1,16 @@
+{
+  "accounts_file": "C:/Users/Pavel/Desktop/Program/Test.txt",
+  "macro_folder": "C:\\Users\\Pavel\\Desktop\\Program\\macros",
+  "use_server_selection": false,
+  "last_macro": "6lvl.txt",
+  "visibility_settings": {
+    "show_log": true,
+    "show_server": false,
+    "show_macro_list": true,
+    "show_help": false,
+    "resizable_window": true,
+    "window_width": 800,
+    "window_height": 1000
+  },
+  "image_folder": "C:\\Users\\Pavel\\Desktop\\Program\\templates"
+}
