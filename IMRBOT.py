@@ -33,10 +33,10 @@ from pathlib import Path
 # ============================================
 # 🔢 ВЕРСИЯ ПРОГРАММЫ
 # ============================================
-VERSION = "0.03"
+VERSION = "0.03"  # ✅ Локальная версия
 
 # ============================================
-# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw + КЭШИРОВАНИЕ)
+# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw + ИСПРАВЛЕНИЯ)
 # ============================================
 class UpdateChecker:
     # ✅ GitHub Raw URLs (ИСПРАВЛЕНО - больше не Google Drive!)
@@ -46,7 +46,7 @@ class UpdateChecker:
     BACKUP_FOLDER = Path("backups")
     MAIN_FILE = "IMRBOT.py"
     CACHE_FILE = Path("macros/update_cache.json")
-    CACHE_DURATION = 3600  # ✅ Кэш на 1 час (не проверять чаще)
+    CACHE_DURATION = 3600  # ✅ Кэш на 1 час
     
     @staticmethod
     def get_local_version():
@@ -75,8 +75,8 @@ class UpdateChecker:
                     'timestamp': time.time(),
                     'checked_at': datetime.now().isoformat()
                 }, f, ensure_ascii=False, indent=2)
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ Ошибка сохранения кэша: {e}")
     
     @staticmethod
     def get_remote_version():
@@ -86,7 +86,6 @@ class UpdateChecker:
         if cache_data:
             cache_time = cache_data.get('timestamp', 0)
             cache_version = cache_data.get('version')
-            # ✅ Если кэш свежий (меньше часа) - возвращаем из кэша
             if time.time() - cache_time < UpdateChecker.CACHE_DURATION:
                 print(f"✅ Версия из кэша: {cache_version}")
                 return cache_version
@@ -105,7 +104,6 @@ class UpdateChecker:
                 data = json.loads(response.read().decode('utf-8'))
                 version = data.get('version', None)
                 
-                # ✅ Сохраняем в кэш
                 if version:
                     UpdateChecker._save_cache(version)
                     print(f"✅ Версия с GitHub: {version}")
@@ -115,18 +113,14 @@ class UpdateChecker:
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 print("⚠️ GitHub вернул 429 (слишком много запросов)")
-                print("   Возвращаем кэшированную версию...")
-                # ✅ Возвращаем кэш при 429 ошибке
                 return cache_data.get('version') if cache_data else None
             else:
                 print(f"❌ Ошибка HTTP {e.code}: {e}")
         except urllib.error.URLError as e:
             print(f"❌ Ошибка подключения: {e}")
-            # ✅ Возвращаем кэш при ошибке сети
             return cache_data.get('version') if cache_data else None
         except Exception as e:
             print(f"❌ Ошибка получения версии: {e}")
-            # ✅ Возвращаем кэш при любой ошибке
             return cache_data.get('version') if cache_data else None
         
         return None
@@ -173,16 +167,21 @@ class UpdateChecker:
     
     @staticmethod
     def download_update(callback=None):
-        """✅ Скачивание обновления с прогрессом"""
+        """✅ Скачивание обновления с прогрессом и ОТЛАДКОЙ"""
         try:
+            # ✅ Создаём папку для бэкапов
             UpdateChecker.BACKUP_FOLDER.mkdir(exist_ok=True)
             temp_file = UpdateChecker.BACKUP_FOLDER / "IMRBOT_update.tmp"
+            
+            print(f"🔄 Начинаем загрузку с: {UpdateChecker.UPDATE_URL}")
             
             def report_hook(block_num, block_size, total_size):
                 if callback and total_size > 0:
                     downloaded = block_num * block_size
                     percent = min(100, downloaded * 100 / total_size)
                     callback(int(percent), downloaded, total_size)
+                if block_num % 10 == 0:
+                    print(f"📥 Загрузка: {block_num * block_size} байт")
             
             req = urllib.request.Request(
                 UpdateChecker.UPDATE_URL,
@@ -194,26 +193,42 @@ class UpdateChecker:
                 reporthook=report_hook
             )
             
-            if temp_file.exists() and temp_file.stat().st_size > 50000:
-                try:
-                    with open(temp_file, 'r', encoding='utf-8') as f:
-                        compile(f.read(), str(temp_file), 'exec')
-                    return str(temp_file)
-                except SyntaxError:
-                    print("❌ Загруженный файл содержит синтаксические ошибки")
+            # ✅ Проверка размера файла
+            if temp_file.exists():
+                file_size = temp_file.stat().st_size
+                print(f"✅ Файл загружен: {file_size} байт")
+                
+                if file_size > 50000:  # Минимум 50KB для Python файла
+                    # ✅ Проверка синтаксиса
+                    try:
+                        with open(temp_file, 'r', encoding='utf-8') as f:
+                            compile(f.read(), str(temp_file), 'exec')
+                        print("✅ Синтаксис файла корректен")
+                        return str(temp_file)
+                    except SyntaxError as e:
+                        print(f"❌ Ошибка синтаксиса: {e}")
+                        temp_file.unlink(missing_ok=True)
+                        return None
+                else:
+                    print(f"❌ Файл слишком маленький: {file_size} байт")
                     temp_file.unlink(missing_ok=True)
                     return None
-            
-            temp_file.unlink(missing_ok=True)
-            return None
+            else:
+                print("❌ Файл не был создан")
+                return None
+                
         except urllib.error.HTTPError as e:
+            print(f"❌ HTTP ошибка {e.code}: {e}")
             if e.code == 429:
                 print("⚠️ GitHub блокирует запросы (429). Повторите через 5 минут.")
-            else:
-                print(f"❌ Ошибка загрузки: HTTP {e.code}")
+            return None
+        except urllib.error.URLError as e:
+            print(f"❌ Ошибка подключения: {e}")
+            return None
         except Exception as e:
             print(f"❌ Ошибка загрузки обновления: {e}")
-        return None
+            print(traceback.format_exc())
+            return None
     
     @staticmethod
     def apply_update(new_file, main_file=None):
@@ -226,11 +241,16 @@ class UpdateChecker:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup = UpdateChecker.BACKUP_FOLDER / f"{main_file}.backup.{timestamp}"
             
+            print(f"📁 Создаём бэкап: {backup}")
+            
             if Path(main_file).exists():
                 shutil.copy2(main_file, backup)
                 print(f"✅ Бэкап создан: {backup}")
+            else:
+                print(f"⚠️ Исходный файл не найден: {main_file}")
             
-            shutil.move(new_file, main_file)
+            print(f"📁 Копируем новый файл: {new_file} → {main_file}")
+            shutil.copy2(new_file, main_file)  # ✅ copy2 вместо move
             
             if Path(main_file).exists() and Path(main_file).stat().st_size > 50000:
                 try:
@@ -238,6 +258,11 @@ class UpdateChecker:
                         compile(f.read(), main_file, 'exec')
                     print("✅ Обновление применено успешно")
                     UpdateChecker._cleanup_old_backups()
+                    
+                    # ✅ Удаляем временный файл
+                    if Path(new_file).exists():
+                        Path(new_file).unlink()
+                    
                     return True
                 except SyntaxError as e:
                     print(f"❌ Ошибка синтаксиса: {e}")
@@ -246,17 +271,20 @@ class UpdateChecker:
                         print("✅ Выполнен откат")
                     return False
             
+            print("❌ Файл не прошёл проверку размера")
             if backup.exists():
                 shutil.copy2(backup, main_file)
             return False
             
         except Exception as e:
             print(f"❌ Ошибка применения обновления: {e}")
+            print(traceback.format_exc())
             try:
                 backups = list(UpdateChecker.BACKUP_FOLDER.glob(f"{main_file}.backup.*"))
                 if backups:
                     latest = max(backups, key=lambda p: p.stat().st_mtime)
                     shutil.copy2(latest, main_file)
+                    print(f"✅ Выполнен аварийный откат: {latest}")
             except:
                 pass
             return False
@@ -272,6 +300,7 @@ class UpdateChecker:
             )
             for old_backup in backups[keep_count:]:
                 old_backup.unlink()
+                print(f"🗑️ Удалён старый бэкап: {old_backup.name}")
         except:
             pass
 
@@ -1504,22 +1533,28 @@ class VisibilitySettingsDialog(QDialog):
 
 
 # ============================================
-# 🔄 ДИАЛОГ ОБНОВЛЕНИЯ
+# 🔄 ДИАЛОГ ОБНОВЛЕНИЯ (С ОТЛАДКОЙ)
 # ============================================
 class UpdateDialog(QDialog):
     def __init__(self, local_version, remote_version, changelog=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔄 Доступно обновление")
-        self.setFixedSize(450, 280)
+        self.setFixedSize(450, 300)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        
         layout = QVBoxLayout(self)
+        
         title = QLabel(f"✨ Новая версия {remote_version} доступна!")
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #27ae60;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        info = QLabel(f"Ваша версия: {local_version}\n\nЧто нового:")
+        
+        info = QLabel(f"Ваша версия: {local_version}\n\nХотите обновить программу?")
         info.setWordWrap(True)
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info)
+        
+        # ✅ Список изменений
         if changelog:
             changelog_text = "\n".join(f"• {item}" for item in changelog[:5])
             if len(changelog) > 5:
@@ -1528,16 +1563,29 @@ class UpdateDialog(QDialog):
             changelog_label.setStyleSheet("color: #34495e; font-size: 11px;")
             changelog_label.setWordWrap(True)
             layout.addWidget(changelog_label)
+        
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
+        
+        # ✅ Лог для отладки
+        self.debug_log = QTextEdit()
+        self.debug_log.setReadOnly(True)
+        self.debug_log.setFixedHeight(80)
+        self.debug_log.setStyleSheet("background: #2c3e50; color: #ecf0f1; font-family: Consolas; font-size: 10px;")
+        self.debug_log.setVisible(False)
+        layout.addWidget(self.debug_log)
+        
         btn_layout = QHBoxLayout()
+        
         self.btn_update = QPushButton("✅ Обновить")
         self.btn_update.setStyleSheet("background: #27ae60; color: white; height: 35px; font-weight: bold;")
         self.btn_update.clicked.connect(self.accept)
+        
         self.btn_skip = QPushButton("❌ Позже")
         self.btn_skip.setStyleSheet("background: #e74c3c; color: white; height: 35px;")
         self.btn_skip.clicked.connect(self.reject)
+        
         btn_layout.addWidget(self.btn_update)
         btn_layout.addWidget(self.btn_skip)
         layout.addLayout(btn_layout)
@@ -1553,6 +1601,13 @@ class UpdateDialog(QDialog):
         self.btn_skip.setEnabled(not updating)
         if updating:
             self.btn_update.setText("⏳ Загрузка...")
+    
+    def add_debug_message(self, message):
+        """✅ Добавление сообщения в лог отладки"""
+        self.debug_log.setVisible(True)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.debug_log.append(f"[{timestamp}] {message}")
+        self.debug_log.verticalScrollBar().setValue(self.debug_log.verticalScrollBar().maximum())
 
 
 # ============================================
@@ -1609,27 +1664,50 @@ class InfiniteBotApp(QMainWindow):
         QTimer.singleShot(1000, self.register_hotkeys)
     
     def check_for_updates(self):
-        try:
-            local_version = UpdateChecker.get_local_version()
-            remote_version = UpdateChecker.get_remote_version()
-            if remote_version and UpdateChecker.compare_versions(local_version, remote_version):
-                changelog = UpdateChecker.get_remote_changelog()
-                dialog = UpdateDialog(local_version, remote_version, changelog, self)
-                def on_download_progress(percent, downloaded, total):
-                    dialog.show_progress(percent, downloaded, total)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    dialog.set_updating(True)
-                    new_file = UpdateChecker.download_update(on_download_progress)
-                    if new_file:
-                        if UpdateChecker.apply_update(new_file):
-                            QMessageBox.information(self, "✅ Обновление успешно", "Программа обновлена!\nПерезапустите приложение.")
-                            sys.exit(0)
-                        else:
-                            QMessageBox.warning(self, "❌ Ошибка", "Не удалось применить обновление.")
+    """✅ Проверка обновлений при запуске (С ОТЛАДКОЙ)"""
+    try:
+        local_version = UpdateChecker.get_local_version()
+        remote_version = UpdateChecker.get_remote_version()
+        
+        print(f"🔍 Проверка версий: локальная={local_version}, удалённая={remote_version}")
+        
+        if remote_version and UpdateChecker.compare_versions(local_version, remote_version):
+            # ✅ Показываем диалог обновления
+            changelog = UpdateChecker.get_remote_changelog()
+            dialog = UpdateDialog(local_version, remote_version, changelog, self)
+            
+            def on_download_progress(percent, downloaded, total):
+                dialog.show_progress(percent, downloaded, total)
+                dialog.add_debug_message(f"Загрузка: {percent}% ({downloaded}/{total})")
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                dialog.set_updating(True)
+                dialog.add_debug_message("Начинаем загрузку обновления...")
+                
+                # ✅ Скачиваем обновление
+                new_file = UpdateChecker.download_update(on_download_progress)
+                
+                if new_file:
+                    dialog.add_debug_message(f"Файл загружен: {new_file}")
+                    
+                    # ✅ Применяем обновление
+                    if UpdateChecker.apply_update(new_file):
+                        dialog.add_debug_message("✅ Обновление успешно применено!")
+                        QMessageBox.information(self, "✅ Обновление успешно", 
+                            "Программа обновлена!\n\nПожалуйста, перезапустите приложение.")
+                        sys.exit(0)  # ✅ Завершаем для перезапуска
                     else:
-                        QMessageBox.warning(self, "❌ Ошибка", "Не удалось загрузить обновление.")
-        except Exception as e:
-            print(f"⚠️ Ошибка проверки обновлений: {e}")
+                        dialog.add_debug_message("❌ Ошибка применения обновления")
+                        QMessageBox.warning(self, "❌ Ошибка обновления", 
+                            "Не удалось применить обновление.\nПопробуйте позже.")
+                else:
+                    dialog.add_debug_message("❌ Не удалось загрузить файл")
+                    QMessageBox.warning(self, "❌ Ошибка загрузки", 
+                        "Не удалось загрузить обновление.\nПроверьте подключение к интернету.")
+    except Exception as e:
+        print(f"⚠️ Ошибка проверки обновлений: {e}")
+        print(traceback.format_exc())
+        # ✅ Продолжаем запуск даже при ошибке обновления
     
     def register_hotkeys(self):
         try:
