@@ -30,6 +30,17 @@ from PyQt6.QtGui import *
 from PyQt6.QtCore import *
 from pathlib import Path
 
+#============================================
+# 📁 ОПРЕДЕЛЕНИЕ ПУТИ К ПРОГРАММЕ
+# ============================================
+# ✅ Получаем абсолютный путь к папке, где лежит IMRBOT.py
+SCRIPT_DIR = Path(__file__).parent.resolve()
+
+# ✅ Функция для создания путей относительно папки программы
+def program_path(*parts):
+    """Создаёт путь относительно папки программы"""
+    return SCRIPT_DIR / Path(*parts)
+
 # ============================================
 # 🔢 ВЕРСИЯ ПРОГРАММЫ
 # ============================================
@@ -38,14 +49,20 @@ VERSION = "0.02"
 # ============================================
 # 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw)
 # ============================================
+# ============================================
+# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw + ИСПРАВЛЕНИЕ ПУТЕЙ)
+# ============================================
 class UpdateChecker:
+    # ✅ GitHub Raw URLs
     UPDATE_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/IMRBOT.py"
     VERSION_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/macros/version_info.json"
-    VERSION_FILE = Path("macros/version_info.json")
-    BACKUP_FOLDER = Path("backups")
-    MAIN_FILE = "IMRBOT.py"
-    CACHE_FILE = Path("macros/update_cache.json")
-    CACHE_DURATION = 3600
+    
+    # ✅ Пути относительно папки программы (а не system32!)
+    VERSION_FILE = program_path("macros", "version_info.json")
+    BACKUP_FOLDER = program_path("backups")
+    MAIN_FILE = program_path("IMRBOT.py")
+    CACHE_FILE = program_path("macros", "update_cache.json")
+    CACHE_DURATION = 3600  # Кэш на 1 час
     
     @staticmethod
     def get_local_version():
@@ -64,7 +81,7 @@ class UpdateChecker:
     @staticmethod
     def _save_cache(version):
         try:
-            UpdateChecker.CACHE_FILE.parent.mkdir(exist_ok=True)
+            UpdateChecker.CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(UpdateChecker.CACHE_FILE, 'w', encoding='utf-8') as f:
                 json.dump({
                     'version': version,
@@ -138,8 +155,12 @@ class UpdateChecker:
     @staticmethod
     def download_update(callback=None):
         try:
-            UpdateChecker.BACKUP_FOLDER.mkdir(exist_ok=True)
+            # ✅ Создаём папку бэкапов в папке программы
+            UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             temp_file = UpdateChecker.BACKUP_FOLDER / "IMRBOT_update.tmp"
+            
+            print(f"🔄 Загрузка с: {UpdateChecker.UPDATE_URL}")
+            print(f"📁 В папку: {UpdateChecker.BACKUP_FOLDER}")
             
             def report_hook(block_num, block_size, total_size):
                 if callback and total_size > 0:
@@ -154,8 +175,10 @@ class UpdateChecker:
                 try:
                     with open(temp_file, 'r', encoding='utf-8') as f:
                         compile(f.read(), str(temp_file), 'exec')
+                    print(f"✅ Файл загружен: {temp_file} ({temp_file.stat().st_size} байт)")
                     return str(temp_file)
-                except SyntaxError:
+                except SyntaxError as e:
+                    print(f"❌ Ошибка синтаксиса: {e}")
                     temp_file.unlink(missing_ok=True)
                     return None
             temp_file.unlink(missing_ok=True)
@@ -168,14 +191,18 @@ class UpdateChecker:
     def apply_update(new_file, main_file=None):
         if main_file is None:
             main_file = UpdateChecker.MAIN_FILE
+        
         try:
-            UpdateChecker.BACKUP_FOLDER.mkdir(exist_ok=True)
+            UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup = UpdateChecker.BACKUP_FOLDER / f"{main_file}.backup.{timestamp}"
+            backup = UpdateChecker.BACKUP_FOLDER / f"IMRBOT.py.backup.{timestamp}"
+            
+            print(f"📁 Бэкап: {backup}")
+            print(f"📁 Основной файл: {main_file}")
             
             if Path(main_file).exists():
                 shutil.copy2(main_file, backup)
-                print(f"✅ Бэкап создан: {backup}")
+                print(f"✅ Бэкап создан")
             
             shutil.copy2(new_file, main_file)
             
@@ -183,14 +210,16 @@ class UpdateChecker:
                 try:
                     with open(main_file, 'r', encoding='utf-8') as f:
                         compile(f.read(), main_file, 'exec')
-                    print("✅ Обновление применено")
+                    print("✅ Обновление применено успешно")
                     if Path(new_file).exists():
                         Path(new_file).unlink()
+                    UpdateChecker._cleanup_old_backups()
                     return True
                 except SyntaxError as e:
                     print(f"❌ Ошибка синтаксиса: {e}")
                     if backup.exists():
                         shutil.copy2(backup, main_file)
+                        print("✅ Выполнен откат")
                     return False
             
             if backup.exists():
@@ -199,6 +228,19 @@ class UpdateChecker:
         except Exception as e:
             print(f"❌ Ошибка применения: {e}")
             return False
+    
+    @staticmethod
+    def _cleanup_old_backups(keep_count=5):
+        try:
+            backups = sorted(
+                UpdateChecker.BACKUP_FOLDER.glob("IMRBOT.py.backup.*"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            for old_backup in backups[keep_count:]:
+                old_backup.unlink()
+        except:
+            pass
     
     @staticmethod
     def download_update(callback=None):
@@ -1653,10 +1695,10 @@ class InfiniteBotApp(QMainWindow):
         self.worker = None
         self.thread = None
         self.last_cursor_position = 0
-        self.macro_folder_path = Path("macros")
-        self.macro_folder_path.mkdir(exist_ok=True)
+        self.macro_folder_path = program_path("macros")
+        self.macro_folder_path.mkdir(parents=True, exist_ok=True)
         self.server_macro_path = self.macro_folder_path / "server_selection.txt"
-        self.config_path = self.macro_folder_path / "config.json"
+        self.config_path = program_path("macros", "config.json")
         self.visibility_settings = {
             'show_log': True,
             'show_server': True,
@@ -2289,27 +2331,29 @@ class InfiniteBotApp(QMainWindow):
     
     def load_config(self):
         try:
-            if self.config_path.exists():
-                with open(self.config_path, 'r', encoding='utf-8') as f:
+            # ✅ Используем program_path для путей
+            config_file = program_path("macros", "config.json")
+        
+            if config_file.exists():
+                with open(config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                # ✅ Исправление: убираем пробелы в ключах
-                config = {k.strip(): v for k, v in config.items()}
-                accounts_path = config.get('accounts_file', None)
-                if accounts_path and os.path.exists(accounts_path.strip() if isinstance(accounts_path, str) else accounts_path):
-                    self.accounts_file_path = accounts_path.strip() if isinstance(accounts_path, str) else accounts_path
-                    self.path_label.setText(self.accounts_file_path)
-                    try:
-                        with open(self.accounts_file_path, 'r', encoding='utf-8') as f:
-                            self.accounts = [l.strip() for l in f if l.strip()]
-                        self.count_label.setText(f"Аккаунтов: {len(self.accounts)}")
-                        self.append_to_log(f"Загружен файл аккаунтов: {self.accounts_file_path}")
-                    except:
-                        pass
-                macro_folder = config.get('macro_folder', None)
-                if macro_folder and os.path.exists(macro_folder.strip() if isinstance(macro_folder, str) else macro_folder):
-                    self.macro_folder_path = Path(macro_folder.strip() if isinstance(macro_folder, str) else macro_folder)
+            
+                # ✅ Исправляем пути: убираем пробелы в ключах и значениях
+                config = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in config.items()}
+            
+                accounts_path = config.get('accounts_file')
+                if accounts_path and os.path.exists(accounts_path):
+                    self.accounts_file_path = accounts_path
+                    self.path_label.setText(accounts_path)
+                    with open(accounts_path, 'r', encoding='utf-8') as f:
+                        self.accounts = [l.strip() for l in f if l.strip()]
+                    self.count_label.setText(f"Аккаунтов: {len(self.accounts)}")
+            
+                macro_folder = config.get('macro_folder')
+                if macro_folder and os.path.exists(macro_folder):
+                    self.macro_folder_path = Path(macro_folder)
                     self.server_macro_path = self.macro_folder_path / "server_selection.txt"
-                    self.config_path = self.macro_folder_path / "config.json"
+                    self.config_path = program_path("macros", "config.json")
                     self.lbl_macro_folder.setText(f"📁 Папка макросов: {self.macro_folder_path}")
                     self.append_to_log(f"Загружена папка макросов: {self.macro_folder_path}")
                 if config.get('use_server_selection', False):
@@ -2339,7 +2383,10 @@ class InfiniteBotApp(QMainWindow):
     
     def save_config(self):
         try:
-            self.macro_folder_path.mkdir(exist_ok=True)
+            # ✅ Сохраняем конфиг в папку программы
+            config_file = program_path("macros", "config.json")
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+        
             config = {
                 'accounts_file': self.accounts_file_path,
                 'macro_folder': str(self.macro_folder_path.absolute()),
@@ -2348,10 +2395,12 @@ class InfiniteBotApp(QMainWindow):
                 'visibility_settings': self.visibility_settings,
                 'image_folder': self.image_finder.get_folder_path()
             }
-            with open(self.config_path, 'w', encoding='utf-8') as f:
+        
+            with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
+            print(f"✅ Конфиг сохранён: {config_file}")
         except Exception as e:
-            self.append_to_log(f"Ошибка сохранения конфигурации: {e}")
+            print(f"❌ Ошибка сохранения конфигурации: {e}")
     
     def add_wait_command(self):
         try:
