@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Infinite Magicraid Bot + Macro Editor
-Version: 0.03
+Version: 0.02
 """
 
 # ============================================
@@ -56,22 +56,22 @@ def program_path(*parts):
 # ============================================
 # 🔢 ВЕРСИЯ ПРОГРАММЫ
 # ============================================
-VERSION = "0.03"
+VERSION = "0.02"
 
 # ============================================
-# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (ИСПРАВЛЕННЫЕ ПУТИ)
+# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw + ИСПРАВЛЕНИЯ)
 # ============================================
 class UpdateChecker:
     # ✅ GitHub Raw URLs
     UPDATE_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/IMRBOT.py"
     VERSION_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/macros/version_info.json"
     
-    # ✅ ВСЕ пути через program_path() - абсолютные!
+    # ✅ Пути через program_path()
     VERSION_FILE = program_path("macros", "version_info.json")
     BACKUP_FOLDER = program_path("backups")
     MAIN_FILE = program_path("IMRBOT.py")
     CACHE_FILE = program_path("macros", "update_cache.json")
-    CACHE_DURATION = 3600
+    CACHE_DURATION = 3600  # Кэш на 1 час
     
     @staticmethod
     def get_local_version():
@@ -79,6 +79,7 @@ class UpdateChecker:
     
     @staticmethod
     def _load_cache():
+        """✅ Загрузка кэша версий"""
         try:
             if UpdateChecker.CACHE_FILE.exists():
                 with open(UpdateChecker.CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -89,6 +90,7 @@ class UpdateChecker:
     
     @staticmethod
     def _save_cache(version):
+        """✅ Сохранение версии в кэш"""
         try:
             UpdateChecker.CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(UpdateChecker.CACHE_FILE, 'w', encoding='utf-8') as f:
@@ -98,16 +100,24 @@ class UpdateChecker:
     
     @staticmethod
     def get_remote_version():
+        """✅ Получение версии с GitHub (с кэшированием)"""
+        # ✅ Сначала проверяем кэш
         cache_data = UpdateChecker._load_cache()
-        if cache_
+        
+        # ✅ ИСПРАВЛЕНО: было "if cache_" → стало "if cache_data:"
+        if cache_data:
             cache_time = cache_data.get('timestamp', 0)
             cache_version = cache_data.get('version')
             if time.time() - cache_time < UpdateChecker.CACHE_DURATION:
                 print(f"✅ Версия из кэша: {cache_version}")
                 return cache_version
         
+        # ✅ Запрашиваем с GitHub
         try:
-            req = urllib.request.Request(UpdateChecker.VERSION_URL, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(
+                UpdateChecker.VERSION_URL,
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 version = data.get('version', None)
@@ -158,7 +168,6 @@ class UpdateChecker:
     @staticmethod
     def download_update(callback=None):
         try:
-            # ✅ Создаём папку бэкапов
             UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             temp_file = UpdateChecker.BACKUP_FOLDER / "IMRBOT_update.tmp"
             
@@ -198,8 +207,6 @@ class UpdateChecker:
         try:
             UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # ✅ Бэкап ТОЛЬКО в папке backups/
             backup = UpdateChecker.BACKUP_FOLDER / f"IMRBOT.py.backup.{timestamp}"
             
             print(f"📁 Основной файл: {main_file}")
@@ -213,26 +220,20 @@ class UpdateChecker:
                 print(f"⚠️ Исходный файл не найден: {main_file}")
                 return False
             
-            # ✅ Копируем новый файл (не move, чтобы не сломать при ошибке)
             shutil.copy2(new_file, main_file)
             print(f"✅ Файл обновлён: {main_file}")
             
-            # ✅ Проверка
             if Path(main_file).exists() and Path(main_file).stat().st_size > 50000:
                 try:
                     with open(main_file, 'r', encoding='utf-8') as f:
                         compile(f.read(), main_file, 'exec')
                     print("✅ Синтаксис корректен, обновление успешно!")
-                    
-                    # ✅ Удаляем временный файл
                     if Path(new_file).exists():
                         Path(new_file).unlink()
-                    
                     UpdateChecker._cleanup_old_backups()
                     return True
                 except SyntaxError as e:
                     print(f"❌ Ошибка синтаксиса: {e}")
-                    # ✅ Откат
                     if backup.exists():
                         shutil.copy2(backup, main_file)
                         print("✅ Выполнен откат")
@@ -242,10 +243,8 @@ class UpdateChecker:
             if backup.exists():
                 shutil.copy2(backup, main_file)
             return False
-            
         except Exception as e:
             print(f"❌ Ошибка применения: {e}")
-            print(traceback.format_exc())
             return False
     
     @staticmethod
@@ -258,7 +257,6 @@ class UpdateChecker:
             )
             for old_backup in backups[keep_count:]:
                 old_backup.unlink()
-                print(f"🗑️ Удалён старый бэкап: {old_backup.name}")
         except:
             pass
     
@@ -2981,4 +2979,5 @@ if __name__ == "__main__":
         print(f"❌ Критическая ошибка запуска: {e}")
         print(traceback.format_exc())
         sys.exit(1)
+
 
