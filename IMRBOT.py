@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Infinite Magicraid Bot + Macro Editor
-Version: 0.02
+Version: 0.03
 Author: diablogolod1
 GitHub: https://github.com/diablogolod1/IMRBOTPUBLICK
 """
@@ -44,7 +44,7 @@ def program_path(*parts):
 # ============================================
 # 🔢 ВЕРСИЯ ПРОГРАММЫ
 # ============================================
-VERSION = "0.02"
+VERSION = "0.03"
 
 # ============================================
 # 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw)
