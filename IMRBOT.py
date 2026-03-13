@@ -3,11 +3,24 @@
 """
 Infinite Magicraid Bot + Macro Editor
 Version: 0.03
-Author: diablogolod1
-GitHub: https://github.com/diablogolod1/IMRBOTPUBLICK
 """
 
+# ============================================
+# 📁 ОПРЕДЕЛЕНИЕ ПУТИ К ПРОГРАММЕ (ДОБАВИТЬ ПЕРВЫМ!)
+# ============================================
 import sys
+from pathlib import Path
+
+# ✅ Получаем абсолютный путь к папке, где лежит IMRBOT.py
+SCRIPT_DIR = Path(__file__).parent.resolve()
+
+def program_path(*parts):
+    """Создаёт абсолютный путь относительно папки программы"""
+    return SCRIPT_DIR / Path(*parts)
+
+# ============================================
+# 📦 ИМПОРТЫ
+# ============================================
 import os
 import time
 import ctypes
@@ -28,9 +41,8 @@ from datetime import datetime
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 from PyQt6.QtCore import *
-from pathlib import Path
 
-#============================================
+# ============================================
 # 📁 ОПРЕДЕЛЕНИЕ ПУТИ К ПРОГРАММЕ
 # ============================================
 # ✅ Получаем абсолютный путь к папке, где лежит IMRBOT.py
@@ -47,22 +59,19 @@ def program_path(*parts):
 VERSION = "0.03"
 
 # ============================================
-# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw)
-# ============================================
-# ============================================
-# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (GitHub Raw + ИСПРАВЛЕНИЕ ПУТЕЙ)
+# 🌐 ПРОВЕРКА ОБНОВЛЕНИЙ (ИСПРАВЛЕННЫЕ ПУТИ)
 # ============================================
 class UpdateChecker:
     # ✅ GitHub Raw URLs
     UPDATE_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/IMRBOT.py"
     VERSION_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/macros/version_info.json"
     
-    # ✅ Пути относительно папки программы (а не system32!)
+    # ✅ ВСЕ пути через program_path() - абсолютные!
     VERSION_FILE = program_path("macros", "version_info.json")
     BACKUP_FOLDER = program_path("backups")
     MAIN_FILE = program_path("IMRBOT.py")
     CACHE_FILE = program_path("macros", "update_cache.json")
-    CACHE_DURATION = 3600  # Кэш на 1 час
+    CACHE_DURATION = 3600
     
     @staticmethod
     def get_local_version():
@@ -83,17 +92,14 @@ class UpdateChecker:
         try:
             UpdateChecker.CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(UpdateChecker.CACHE_FILE, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'version': version,
-                    'timestamp': time.time()
-                }, f)
+                json.dump({'version': version, 'timestamp': time.time()}, f)
         except:
             pass
     
     @staticmethod
     def get_remote_version():
         cache_data = UpdateChecker._load_cache()
-        if cache_data:
+        if cache_
             cache_time = cache_data.get('timestamp', 0)
             cache_version = cache_data.get('version')
             if time.time() - cache_time < UpdateChecker.CACHE_DURATION:
@@ -101,10 +107,7 @@ class UpdateChecker:
                 return cache_version
         
         try:
-            req = urllib.request.Request(
-                UpdateChecker.VERSION_URL,
-                headers={'User-Agent': 'Mozilla/5.0'}
-            )
+            req = urllib.request.Request(UpdateChecker.VERSION_URL, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 version = data.get('version', None)
@@ -155,11 +158,11 @@ class UpdateChecker:
     @staticmethod
     def download_update(callback=None):
         try:
-            # ✅ Создаём папку бэкапов в папке программы
+            # ✅ Создаём папку бэкапов
             UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             temp_file = UpdateChecker.BACKUP_FOLDER / "IMRBOT_update.tmp"
             
-            print(f"🔄 Загрузка с: {UpdateChecker.UPDATE_URL}")
+            print(f"🔄 Загрузка: {UpdateChecker.UPDATE_URL}")
             print(f"📁 В папку: {UpdateChecker.BACKUP_FOLDER}")
             
             def report_hook(block_num, block_size, total_size):
@@ -190,43 +193,59 @@ class UpdateChecker:
     @staticmethod
     def apply_update(new_file, main_file=None):
         if main_file is None:
-            main_file = UpdateChecker.MAIN_FILE
+            main_file = str(UpdateChecker.MAIN_FILE)
         
         try:
             UpdateChecker.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            # ✅ Бэкап ТОЛЬКО в папке backups/
             backup = UpdateChecker.BACKUP_FOLDER / f"IMRBOT.py.backup.{timestamp}"
             
-            print(f"📁 Бэкап: {backup}")
             print(f"📁 Основной файл: {main_file}")
+            print(f"📁 Бэкап: {backup}")
+            print(f"📁 Новый файл: {new_file}")
             
             if Path(main_file).exists():
                 shutil.copy2(main_file, backup)
-                print(f"✅ Бэкап создан")
+                print(f"✅ Бэкап создан в: {backup}")
+            else:
+                print(f"⚠️ Исходный файл не найден: {main_file}")
+                return False
             
+            # ✅ Копируем новый файл (не move, чтобы не сломать при ошибке)
             shutil.copy2(new_file, main_file)
+            print(f"✅ Файл обновлён: {main_file}")
             
+            # ✅ Проверка
             if Path(main_file).exists() and Path(main_file).stat().st_size > 50000:
                 try:
                     with open(main_file, 'r', encoding='utf-8') as f:
                         compile(f.read(), main_file, 'exec')
-                    print("✅ Обновление применено успешно")
+                    print("✅ Синтаксис корректен, обновление успешно!")
+                    
+                    # ✅ Удаляем временный файл
                     if Path(new_file).exists():
                         Path(new_file).unlink()
+                    
                     UpdateChecker._cleanup_old_backups()
                     return True
                 except SyntaxError as e:
                     print(f"❌ Ошибка синтаксиса: {e}")
+                    # ✅ Откат
                     if backup.exists():
                         shutil.copy2(backup, main_file)
                         print("✅ Выполнен откат")
                     return False
             
+            print("❌ Файл не прошёл проверку")
             if backup.exists():
                 shutil.copy2(backup, main_file)
             return False
+            
         except Exception as e:
             print(f"❌ Ошибка применения: {e}")
+            print(traceback.format_exc())
             return False
     
     @staticmethod
@@ -239,6 +258,7 @@ class UpdateChecker:
             )
             for old_backup in backups[keep_count:]:
                 old_backup.unlink()
+                print(f"🗑️ Удалён старый бэкап: {old_backup.name}")
         except:
             pass
     
@@ -2331,7 +2351,7 @@ class InfiniteBotApp(QMainWindow):
     
     def load_config(self):
         try:
-            # ✅ Используем program_path для путей
+            # ✅ Путь к конфигу через program_path
             config_file = program_path("macros", "config.json")
         
             if config_file.exists():
@@ -2383,7 +2403,6 @@ class InfiniteBotApp(QMainWindow):
     
     def save_config(self):
         try:
-            # ✅ Сохраняем конфиг в папку программы
             config_file = program_path("macros", "config.json")
             config_file.parent.mkdir(parents=True, exist_ok=True)
         
@@ -2962,3 +2981,4 @@ if __name__ == "__main__":
         print(f"❌ Критическая ошибка запуска: {e}")
         print(traceback.format_exc())
         sys.exit(1)
+
