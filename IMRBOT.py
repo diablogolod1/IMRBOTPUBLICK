@@ -1150,33 +1150,13 @@ class BotWorker(QObject):
             command = command.strip()
             if not command or command.startswith('#'):
                 return True
+            
             if not self.running:
                 return False
-            if command.startswith('TEXT:'):
-                search_text = command[5:].strip()
-                self.log_msg.emit(f"🔍 Поиск текста: '{search_text}' (курсор без клика)...")
-                region, w, h = self.get_window_region(hwnd)
-                search_region = (region[0], region[1], region[2], region[3])
-                result = None
-                start_time = time.time()
-                while time.time() - start_time < 5 and self.running:
-                    self.pause_event.wait(timeout=0.1)
-                    if not self.running:
-                        return False
-                    result = self.text_finder.find_text_on_screen(search_text, region=search_region, timeout=0.5, running_flag=self.running, single_attempt=True)
-                    if result:
-                        break
-                    time.sleep(0.3)
-                if result:
-                    x, y, text, conf = result
-                    rx = (x - region[0]) / w
-                    ry = (y - region[1]) / h
-                    self.log_msg.emit(f"✓ Текст '{text}' найден! Навожу курсор на ({rx:.2f}, {ry:.2f})")
-                    self.move_cursor_to(hwnd, rx, ry, delay=0.3)
-                    return True
-                else:
-                    self.log_msg.emit(f"✗ Текст '{search_text}' не найден")
-                    return False
+            
+            # ============================================
+            # 🔍 ETextWait - Ждать текст (НОВАЯ ЛОГИКА)
+            # ============================================
             elif command.startswith('ETextWait('):
                 try:
                     params = command[10:-1].split(',')
@@ -1187,44 +1167,71 @@ class BotWorker(QObject):
                     else:
                         self.log_msg.emit("✗ ETextWait: неверный формат")
                         return False
+                    
                     self.log_msg.emit(f'⏳ ETextWait: интервал={interval}с, таймаут={timeout}с, текст="{search_text}"')
                     region, w, h = self.get_window_region(hwnd)
                     search_region = (region[0], region[1], region[2], region[3])
+                    
                     start_time = time.time()
                     found = False
                     attempt_count = 0
                     result_coords = None
+                    
+                    # 🔄 ЭТАП 1: Цикл поиска
                     while time.time() - start_time < timeout and self.running:
                         if not self.running:
                             break
+                        
                         attempt_count += 1
                         self.pause_event.wait(timeout=min(0.1, interval))
+                        
                         if not self.running:
                             break
-                        result = self.text_finder.find_text_on_screen(search_text, region=search_region, timeout=1.0, running_flag=self.running, single_attempt=True)
+                        
+                        result = self.text_finder.find_text_on_screen(
+                            search_text, 
+                            region=search_region, 
+                            timeout=1.0, 
+                            running_flag=self.running, 
+                            single_attempt=True
+                        )
+                        
                         if result:
                             x, y, text, conf = result
                             rx = (x - region[0]) / w
                             ry = (y - region[1]) / h
                             result_coords = (rx, ry, text)
                             self.log_msg.emit(f"✓ Текст '{text}' найден! (попытка #{attempt_count})")
+                            self.log_msg.emit(f"📍 Координаты: ({rx:.4f}, {ry:.4f})")
                             found = True
-                            break
+                            break  # ⚠️ СРАЗУ ВЫХОДИМ ИЗ ЦИКЛА
+                        
                         if attempt_count % 10 == 0:
                             elapsed = time.time() - start_time
-                            self.log_msg.emit(f"⏳ ETextWait: попытка #{attempt_count} ({elapsed:.1f}с из {timeout}с)...")
-                        time.sleep(interval)
+                            self.log_msg.emit(f"⏳ Поиск: попытка #{attempt_count} ({elapsed:.1f}с из {timeout}с)...")
+                        
+                        time.sleep(interval)  # ✅ Ждём перед следующей попыткой
+                    
+                    # ✅ ЭТАП 2: Клик по сохранённым координатам (ПОСЛЕ цикла!)
                     if found and result_coords:
                         rx, ry, text = result_coords
-                        self.log_msg.emit(f"→ Клик по ({rx:.2f}, {ry:.2f})")
+                        self.log_msg.emit("🔄 Выполняю клик...")
+                        time.sleep(0.3)  # Небольшая пауза перед кликом
                         self.absolute_click(hwnd, rx, ry, delay=0.5)
-                    if not found and self.running:
+                        self.log_msg.emit(f"✅ Клик выполнен по ({rx:.4f}, {ry:.4f})")
+                    elif not found and self.running:
                         self.log_msg.emit(f"⏰ Таймаут ETextWait ({timeout}с, попыток: {attempt_count})")
+                    
                     self.pause_event.set()
                     return True
+                    
                 except Exception as e:
                     self.log_msg.emit(f"✗ Ошибка ETextWait: {e}")
                     return False
+            
+            # ============================================
+            # 🖼️ EIMGWait - Ждать изображение (НОВАЯ ЛОГИКА)
+            # ============================================
             elif command.startswith('EIMGWait('):
                 try:
                     params = command[9:-1].split(',')
@@ -1235,47 +1242,75 @@ class BotWorker(QObject):
                     else:
                         self.log_msg.emit("✗ EIMGWait: неверный формат")
                         return False
+                    
                     if not image_name:
                         self.log_msg.emit("✗ EIMGWait: не указано имя изображения")
                         return False
+                    
                     self.log_msg.emit(f'⏳ EIMGWait: интервал={interval}с, таймаут={timeout}с, изображение="{image_name}"')
                     region, w, h = self.get_window_region(hwnd)
                     search_region = (region[0], region[1], region[2], region[3])
+                    
                     start_time = time.time()
                     found = False
                     attempt_count = 0
                     result_coords = None
+                    
+                    # 🔄 ЭТАП 1: Цикл поиска
                     while time.time() - start_time < timeout and self.running:
                         if not self.running:
                             break
+                        
                         attempt_count += 1
                         self.pause_event.wait(timeout=min(0.1, interval))
+                        
                         if not self.running:
                             break
-                        result = self.image_finder.find_image_on_screen(image_name, region=search_region, timeout=1.0, running_flag=self.running, single_attempt=True)
+                        
+                        result = self.image_finder.find_image_on_screen(
+                            image_name, 
+                            region=search_region, 
+                            timeout=1.0, 
+                            running_flag=self.running, 
+                            single_attempt=True
+                        )
+                        
                         if result:
                             x, y, name, conf = result
                             rx = (x - region[0]) / w
                             ry = (y - region[1]) / h
                             result_coords = (rx, ry, name)
                             self.log_msg.emit(f"✓ Изображение '{name}' найдено! (попытка #{attempt_count})")
+                            self.log_msg.emit(f"📍 Координаты: ({rx:.4f}, {ry:.4f})")
                             found = True
-                            break
+                            break  # ⚠️ СРАЗУ ВЫХОДИМ ИЗ ЦИКЛА
+                        
                         if attempt_count % 10 == 0:
                             elapsed = time.time() - start_time
-                            self.log_msg.emit(f"⏳ EIMGWait: попытка #{attempt_count} ({elapsed:.1f}с из {timeout}с)...")
-                        time.sleep(interval)
+                            self.log_msg.emit(f"⏳ Поиск: попытка #{attempt_count} ({elapsed:.1f}с из {timeout}с)...")
+                        
+                        time.sleep(interval)  # ✅ Ждём перед следующей попыткой
+                    
+                    # ✅ ЭТАП 2: Клик по сохранённым координатам (ПОСЛЕ цикла!)
                     if found and result_coords:
                         rx, ry, name = result_coords
-                        self.log_msg.emit(f"→ Клик по ({rx:.2f}, {ry:.2f})")
+                        self.log_msg.emit("🔄 Выполняю клик...")
+                        time.sleep(0.3)  # Небольшая пауза перед кликом
                         self.absolute_click(hwnd, rx, ry, delay=0.5)
-                    if not found and self.running:
+                        self.log_msg.emit(f"✅ Клик выполнен по ({rx:.4f}, {ry:.4f})")
+                    elif not found and self.running:
                         self.log_msg.emit(f"⏰ Таймаут EIMGWait ({timeout}с, попыток: {attempt_count})")
+                    
                     self.pause_event.set()
                     return True
+                    
                 except Exception as e:
                     self.log_msg.emit(f"✗ Ошибка EIMGWait: {e}")
                     return False
+            
+            # ============================================
+            # ОСТАЛЬНЫЕ КОМАНДЫ (без изменений)
+            # ============================================
             elif command.startswith('CLICK:'):
                 coords = command[6:].strip()
                 try:
@@ -1287,6 +1322,7 @@ class BotWorker(QObject):
                 except Exception as e:
                     self.log_msg.emit(f"✗ Ошибка координат: {coords} - {e}")
                     return False
+            
             elif command.startswith('WAIT:'):
                 try:
                     seconds = float(command[5:].strip())
@@ -1302,6 +1338,7 @@ class BotWorker(QObject):
                 except Exception as e:
                     self.log_msg.emit(f"✗ Ошибка времени: {command} - {e}")
                     return False
+            
             elif command.startswith('EText:'):
                 text_to_type = command[6:].strip()
                 if text_to_type == '{EMAIL}':
@@ -1314,6 +1351,7 @@ class BotWorker(QObject):
                     self.log_msg.emit(f"⌨️ Ввод текста: {text_to_type[:20]}...")
                 pyautogui.write(text_to_type, interval=0.05)
                 return True
+            
             elif command.startswith('IMG:'):
                 image_name = command[4:].strip()
                 self.log_msg.emit(f"🖼️ Поиск изображения: {image_name}...")
@@ -1325,10 +1363,17 @@ class BotWorker(QObject):
                     self.pause_event.wait(timeout=0.1)
                     if not self.running:
                         return False
-                    result = self.image_finder.find_image_on_screen(image_name, region=search_region, timeout=0.5, running_flag=self.running, single_attempt=True)
+                    result = self.image_finder.find_image_on_screen(
+                        image_name, 
+                        region=search_region, 
+                        timeout=0.5, 
+                        running_flag=self.running, 
+                        single_attempt=True
+                    )
                     if result:
                         break
                     time.sleep(0.3)
+                
                 if result:
                     x, y, name, conf = result
                     rx = (x - region[0]) / w
@@ -1339,7 +1384,42 @@ class BotWorker(QObject):
                 else:
                     self.log_msg.emit(f"✗ Изображение '{image_name}' не найдено")
                     return False
+            
+            elif command.startswith('TEXT:'):
+                search_text = command[5:].strip()
+                self.log_msg.emit(f"🔍 Поиск текста: '{search_text}' (курсор без клика)...")
+                region, w, h = self.get_window_region(hwnd)
+                search_region = (region[0], region[1], region[2], region[3])
+                result = None
+                start_time = time.time()
+                while time.time() - start_time < 5 and self.running:
+                    self.pause_event.wait(timeout=0.1)
+                    if not self.running:
+                        return False
+                    result = self.text_finder.find_text_on_screen(
+                        search_text, 
+                        region=search_region, 
+                        timeout=0.5, 
+                        running_flag=self.running, 
+                        single_attempt=True
+                    )
+                    if result:
+                        break
+                    time.sleep(0.3)
+                
+                if result:
+                    x, y, text, conf = result
+                    rx = (x - region[0]) / w
+                    ry = (y - region[1]) / h
+                    self.log_msg.emit(f"✓ Текст '{text}' найден! Навожу курсор на ({rx:.2f}, {ry:.2f})")
+                    self.move_cursor_to(hwnd, rx, ry, delay=0.3)
+                    return True
+                else:
+                    self.log_msg.emit(f"✗ Текст '{search_text}' не найден")
+                    return False
+            
             return True
+            
         except Exception as e:
             self.log_msg.emit(f"❌ Ошибка выполнения команды: {e}")
             return False
@@ -1528,104 +1608,130 @@ class MacroListWidget(QListWidget):
 class VisibilitySettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ Настройки")
-        self.setFixedSize(450, 450)
+        self.setWindowTitle("⚙️ Настройки Окна")
+        self.setFixedSize(450, 400)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.visibility_settings = {
-            'show_log': True,
-            'show_server': True,
-            'show_macro_list': True,
-            'show_help': True,
-            'resizable_window': False,
-            'window_width': 1100,
-            'window_height': 1100
+        
+        self.window_settings = {
+            'window_width': 1400,
+            'window_height': 900
         }
+        
         self.init_ui()
     
     def init_ui(self):
         layout = QVBoxLayout(self)
-        title = QLabel("📋 Управление видимостью и размером окна")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2980b9;")
+        layout.setSpacing(15)
+        
+        # Заголовок
+        title = QLabel("📐 Настройки Размера Окна")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #e94560;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        
         layout.addSpacing(10)
-        info = QLabel("Отметьте элементы, которые хотите отображать:\n(скрытые элементы продолжают работать)")
-        info.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        
+        # Информация
+        info = QLabel(
+            "💡 Окно автоматически сохранит последний размер\n"
+            "💡 Вы также можете изменить размер перетаскиванием краёв"
+        )
+        info.setStyleSheet("color: #95a5a6; font-size: 12px; line-height: 1.6;")
         info.setWordWrap(True)
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info)
-        layout.addSpacing(15)
-        self.chk_log = QCheckBox("📋 Лог событий")
-        self.chk_log.setChecked(True)
-        self.chk_server = QCheckBox("🖱️ Выбор сервера")
-        self.chk_server.setChecked(True)
-        self.chk_macro_list = QCheckBox("📂 Список макросов")
-        self.chk_macro_list.setChecked(True)
-        self.chk_help = QCheckBox("💡 Подсказки")
-        self.chk_help.setChecked(True)
-        layout.addWidget(self.chk_log)
-        layout.addWidget(self.chk_server)
-        layout.addWidget(self.chk_macro_list)
-        layout.addWidget(self.chk_help)
+        
         layout.addSpacing(20)
-        size_group = QGroupBox("📐 Размер окна программы")
+        
+        # Размер окна
+        size_group = QGroupBox("📏 Размер Окна (пиксели)")
         size_layout = QVBoxLayout(size_group)
-        self.chk_resizable = QCheckBox("Разрешить изменение размера окна")
-        self.chk_resizable.setChecked(False)
-        self.chk_resizable.setToolTip("Позволяет растягивать окно за края")
-        size_layout.addWidget(self.chk_resizable)
-        size_info = QLabel("Минимальный размер: 800x600 пикселей")
-        size_info.setStyleSheet("color: #e74c3c; font-size: 10px;")
-        size_layout.addWidget(size_info)
+        
+        size_input_layout = QHBoxLayout()
+        
         self.spin_width = QSpinBox()
         self.spin_width.setRange(800, 3840)
-        self.spin_width.setValue(1100)
-        self.spin_width.setPrefix("Ширина:     ")
+        self.spin_width.setValue(1400)
+        self.spin_width.setPrefix("Ширина:  ")
         self.spin_width.setSuffix(" px")
+        self.spin_width.setStyleSheet("font-size: 13px; padding: 5px;")
+        
         self.spin_height = QSpinBox()
         self.spin_height.setRange(600, 2160)
-        self.spin_height.setValue(1100)
-        self.spin_height.setPrefix("Высота:     ")
+        self.spin_height.setValue(900)
+        self.spin_height.setPrefix("Высота:  ")
         self.spin_height.setSuffix(" px")
-        size_layout.addWidget(self.spin_width)
-        size_layout.addWidget(self.spin_height)
+        self.spin_height.setStyleSheet("font-size: 13px; padding: 5px;")
+        
+        size_input_layout.addWidget(self.spin_width)
+        size_input_layout.addWidget(self.spin_height)
+        size_layout.addLayout(size_input_layout)
+        
+        # Пресеты
+        presets_layout = QHBoxLayout()
+        presets_layout.addWidget(QLabel("Быстрый выбор:"))
+        
+        btn_small = QPushButton("800x600")
+        btn_small.setFixedHeight(30)
+        btn_small.clicked.connect(lambda: self._set_size(800, 600))
+        
+        btn_medium = QPushButton("1200x800")
+        btn_medium.setFixedHeight(30)
+        btn_medium.clicked.connect(lambda: self._set_size(1200, 800))
+        
+        btn_large = QPushButton("1400x900")
+        btn_large.setFixedHeight(30)
+        btn_large.clicked.connect(lambda: self._set_size(1400, 900))
+        
+        btn_full = QPushButton("1920x1080")
+        btn_full.setFixedHeight(30)
+        btn_full.clicked.connect(lambda: self._set_size(1920, 1080))
+        
+        presets_layout.addWidget(btn_small)
+        presets_layout.addWidget(btn_medium)
+        presets_layout.addWidget(btn_large)
+        presets_layout.addWidget(btn_full)
+        size_layout.addLayout(presets_layout)
+        
         layout.addWidget(size_group)
-        layout.addSpacing(20)
+        
+        layout.addStretch()
+        
+        # Кнопки
         btn_layout = QHBoxLayout()
-        btn_save = QPushButton("💾 Сохранить и применить")
-        btn_save.setStyleSheet("background: #27ae60; color: white; height: 35px; font-weight: bold;")
+        
+        btn_save = QPushButton("💾 Сохранить")
+        btn_save.setFixedHeight(45)
+        btn_save.setStyleSheet("background-color: #27ae60; font-size: 14px; font-weight: bold;")
         btn_save.clicked.connect(self.save_settings)
+        
         btn_cancel = QPushButton("❌ Отмена")
-        btn_cancel.setStyleSheet("background: #e74c3c; color: white; height: 35px;")
+        btn_cancel.setFixedHeight(45)
+        btn_cancel.setStyleSheet("background-color: #e74c3c; font-size: 14px; font-weight: bold;")
         btn_cancel.clicked.connect(self.reject)
+        
         btn_layout.addWidget(btn_save)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
     
+    def _set_size(self, width, height):
+        self.spin_width.setValue(width)
+        self.spin_height.setValue(height)
+    
     def save_settings(self):
-        self.visibility_settings = {
-            'show_log': self.chk_log.isChecked(),
-            'show_server': self.chk_server.isChecked(),
-            'show_macro_list': self.chk_macro_list.isChecked(),
-            'show_help': self.chk_help.isChecked(),
-            'resizable_window': self.chk_resizable.isChecked(),
+        self.window_settings = {
             'window_width': self.spin_width.value(),
             'window_height': self.spin_height.value()
         }
         self.accept()
     
     def get_settings(self):
-        return self.visibility_settings
+        return self.window_settings
     
     def load_settings(self, settings):
-        self.visibility_settings = settings
-        self.chk_log.setChecked(settings.get('show_log', True))
-        self.chk_server.setChecked(settings.get('show_server', True))
-        self.chk_macro_list.setChecked(settings.get('show_macro_list', True))
-        self.chk_help.setChecked(settings.get('show_help', True))
-        self.chk_resizable.setChecked(settings.get('resizable_window', False))
-        self.spin_width.setValue(settings.get('window_width', 1100))
-        self.spin_height.setValue(settings.get('window_height', 1100))
-
+        self.window_settings = settings
+        self.spin_width.setValue(settings.get('window_width', 1400))
+        self.spin_height.setValue(settings.get('window_height', 900))
 
 # ============================================
 # 🔄 ДИАЛОГ ОБНОВЛЕНИЯ (С ОТЛАДКОЙ)
@@ -1686,6 +1792,188 @@ class UpdateDialog(QDialog):
         self.debug_log.append(f"[{timestamp}] {message}")
         self.debug_log.verticalScrollBar().setValue(self.debug_log.verticalScrollBar().maximum())
 
+# ============================================
+# 🎨 СОВРЕМЕННЫЕ СТИЛИ ИНТЕРФЕЙСА
+# ============================================
+MODERN_STYLESHEET = """
+QMainWindow {
+    background-color: #1a1a2e;
+}
+QWidget {
+    background-color: #1a1a2e;
+    color: #ecf0f1;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+QGroupBox {
+    background-color: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    margin-top: 15px;
+    padding-top: 15px;
+    font-weight: bold;
+    color: #e94560;
+    font-size: 12px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 15px;
+    padding: 0 10px;
+    color: #e94560;
+}
+QPushButton {
+    background-color: #0f3460;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 15px;
+    font-weight: bold;
+    font-size: 11px;
+    min-width: 50px;
+}
+QPushButton:hover {
+    background-color: #e94560;
+}
+QPushButton:pressed {
+    background-color: #c0392b;
+}
+QPushButton:disabled {
+    background-color: #34495e;
+    color: #7f8c8d;
+}
+QLineEdit {
+    background-color: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #ecf0f1;
+    font-size: 13px;
+}
+QLineEdit:focus {
+    border-color: #e94560;
+}
+QTextEdit, QPlainTextEdit {
+    background-color: #0f0f1a;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    padding: 10px;
+    color: #ecf0f1;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+}
+QListWidget {
+    background-color: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    color: #ecf0f1;
+}
+QListWidget::item {
+    padding: 8px;
+    border-radius: 4px;
+}
+QListWidget::item:selected {
+    background-color: #e94560;
+}
+QListWidget::item:hover {
+    background-color: #0f3460;
+}
+QProgressBar {
+    background-color: #16213e;
+    border: none;
+    border-radius: 6px;
+    height: 20px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background-color: #e94560;
+    border-radius: 6px;
+}
+QCheckBox {
+    color: #ecf0f1;
+    font-size: 13px;
+    spacing: 8px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid #0f3460;
+    background-color: #16213e;
+}
+QCheckBox::indicator:checked {
+    background-color: #e94560;
+    border-color: #e94560;
+}
+QLabel {
+    color: #ecf0f1;
+    font-size: 13px;
+}
+QComboBox {
+    background-color: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #ecf0f1;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+}
+QComboBox QAbstractItemView {
+    background-color: #16213e;
+    color: #ecf0f1;
+    border: 2px solid #0f3460;
+    selection-background-color: #e94560;
+}
+QScrollBar:vertical {
+    background-color: #16213e;
+    width: 12px;
+    border-radius: 6px;
+}
+QScrollBar::handle:vertical {
+    background-color: #0f3460;
+    border-radius: 6px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: #e94560;
+}
+QTabWidget::pane {
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    background-color: #16213e;
+}
+QTabBar::tab {
+    background-color: #0f3460;
+    color: #ecf0f1;
+    padding: 10px 20px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    margin-right: 3px;
+}
+QTabBar::tab:selected {
+    background-color: #e94560;
+}
+QTabBar::tab:hover:!selected {
+    background-color: #1a1a2e;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    padding: 8px;
+    color: #ecf0f1;
+}
+"""
+
+# Цвета для логов
+LOG_COLORS = {
+    'info': '#3498db',
+    'success': '#27ae60',
+    'warning': '#f39c12',
+    'error': '#e74c3c',
+    'process': '#9b59b6',
+    'highlight': '#e94560'
+}
 
 # ============================================
 # 🖥️ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
@@ -1693,9 +1981,12 @@ class UpdateDialog(QDialog):
 class InfiniteBotApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Infinite Magicraid Bot + Редактор Макросов [v{VERSION}]")
-        self.setMinimumSize(800, 600)
-        self.resize(1100, 1100)
+        self.setWindowTitle(f"Infinite Magicraid Bot v{VERSION}")
+        self.setMinimumSize(1200, 800)
+        self.resize(1400, 900)
+        self.setStyleSheet(MODERN_STYLESHEET)
+    
+        # Состояние
         self.is_bot_running = False
         self.is_loading_file = False
         self.is_capturing = False
@@ -1703,6 +1994,8 @@ class InfiniteBotApp(QMainWindow):
         self.is_macro_operation = False
         self.accounts = []
         self.accounts_file_path = None
+    
+        # Компоненты
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.macro_recorder = MacroRecorder()
@@ -1713,31 +2006,34 @@ class InfiniteBotApp(QMainWindow):
         self.worker = None
         self.thread = None
         self.last_cursor_position = 0
+    
+        # Пути
         self.macro_folder_path = program_path("macros")
         self.macro_folder_path.mkdir(parents=True, exist_ok=True)
         self.server_macro_path = self.macro_folder_path / "server_selection.txt"
         self.config_path = program_path("macros", "config.json")
+    
+        # Настройки окна (только размер)
         self.visibility_settings = {
-            'show_log': True,
-            'show_server': True,
-            'show_macro_list': True,
-            'show_help': True,
-            'resizable_window': False,
-            'window_width': 1100,
-            'window_height': 1100
+            'window_width': 1400,
+            'window_height': 900
         }
+    
+        # ✅ ИНИЦИАЛИЗАЦИЯ ВИДЖЕТОВ (важно!)
         self.log_widget = None
         self.server_widget = None
         self.macro_list_widget = None
         self.help_widget = None
-        self.macro_editor = None
-        self.log = None
+    
         # ✅ ПРОВЕРКА ОБНОВЛЕНИЙ ПРИ ЗАПУСКЕ
         self.check_for_updates()
-        self.init_ui_step1()
-        self.init_ui_step2()
+    
+        # Инициализация UI
+        self.init_main_interface()
         self.load_config()
         self.load_last_macro()
+    
+        # Горячие клавиши
         QTimer.singleShot(1000, self.register_hotkeys)
     
     def check_for_updates(self):
@@ -1787,256 +2083,552 @@ class InfiniteBotApp(QMainWindow):
         if self.log:
             QMetaObject.invokeMethod(self.log, "append", Qt.ConnectionType.QueuedConnection, Q_ARG(str, message))
     
-    def init_ui_step1(self):
-        self.page1 = QWidget()
-        layout = QVBoxLayout(self.page1)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        btn = QPushButton("Выбрать файл аккаунтов (.txt)")
-        btn.setFixedSize(300, 50)
-        btn.clicked.connect(self.load_file)
-        self.path_label = QLabel("Путь: не выбран")
-        self.path_label.setWordWrap(True)
-        self.count_label = QLabel("Аккаунтов: 0")
-        ocr_status = "✅ OCR доступен" if self.text_finder.ocr_available else "⚠️ OCR недоступен"
-        ocr_color = "#27ae60" if self.text_finder.ocr_available else "#e74c3c"
-        info = QLabel(
-            f"⚠️ ВАЖНО:\n"
-            f"1. Формат файла: email+password\n"
-            f"2. Авторизация прописана в программе\n"
-            f"3. Макросы после входа редактируемые\n"
-            f"4. F1 - экстренная остановка\n"
-            f"5. F2 - запись выбора сервера (вкл/выкл)\n"
-            f"6. F3 - запуск бота + авторизация\n"
-            f"7. F4 - запуск только макроса\n"
-            f"8. F5 - пауза/продолжение выполнения\n"
-            f"9. Запустите игру перед ботом\n"
-            f"10. Запустите бот ОТ ИМЕНИ АДМИНИСТРАТОРА\n"
-            f"11. {ocr_status} (поиск текста через OCR)\n"
-            f"12. ETextWait(интервал, таймаут, \"текст\") - ждать текст\n"
-            f"13. EIMGWait(интервал, таймаут, \"имя\") - ждать изображение\n"
-            f"14. EText:{{EMAIL}} или {{PASSWORD}} - вставить данные аккаунта\n"
-            f"15. TEXT:слово - найти текст и НАВЕСТИ КУРСОР (без клика)"
-        )
-        info.setStyleSheet(f"background: {ocr_color}; color: white; padding: 15px; border-radius: 5px;")
-        info.setWordWrap(True)
-        btn_next = QPushButton("Далее")
-        btn_next.setFixedSize(150, 40)
-        btn_next.clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        layout.addWidget(btn)
-        layout.addWidget(self.path_label)
-        layout.addWidget(self.count_label)
-        layout.addSpacing(20)
-        layout.addWidget(info)
-        layout.addSpacing(20)
-        layout.addWidget(btn_next)
-        self.stack.addWidget(self.page1)
+    def init_main_interface(self):
+        """Создание современного главного интерфейса"""
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(15)
+        
+        # === ВЕРХНЯЯ ПАНЕЛЬ ===
+        top_panel = self.create_top_panel()
+        main_layout.addWidget(top_panel)
+        
+        # === ЦЕНТРАЛЬНАЯ ОБЛАСТЬ С ВКЛАДКАМИ ===
+        center_widget = self.create_center_tabs()
+        main_layout.addWidget(center_widget, stretch=1)
+        
+        # === НИЖНЯЯ ПАНЕЛЬ УПРАВЛЕНИЯ ===
+        bottom_panel = self.create_bottom_control_panel()
+        main_layout.addWidget(bottom_panel)
+        
+        self.stack.addWidget(main_widget)
     
-    def init_ui_step2(self):
-        self.page2 = QWidget()
-        main_layout = QVBoxLayout(self.page2)
-        top_bar = QHBoxLayout()
-        back_btn = QPushButton("⬅️ Назад")
-        back_btn.setStyleSheet("background: #95a5a6; color: white; height: 35px; font-weight: bold;")
-        back_btn.clicked.connect(self.go_back_to_page1)
-        top_bar.addWidget(back_btn)
-        top_bar.addStretch()
-        self.btn_settings = QPushButton(f"⚙️ v{VERSION}")
-        self.btn_settings.setFixedSize(80, 35)
-        self.btn_settings.setToolTip(f"Версия: {VERSION}\nНастройки видимости и размера окна")
-        self.btn_settings.setStyleSheet("""
-            QPushButton {
-                background: #34495e;
-                color: white;
-                font-size: 12px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #2c3e50;
-            }
-        """)
+    def create_top_panel(self):
+        """Верхняя панель с информацией и настройками"""
+        panel = QGroupBox("📊 ИНФОРМАЦИЯ")
+        layout = QHBoxLayout(panel)
+        layout.setSpacing(20)
+    
+        # Аккаунты
+        acc_group = QVBoxLayout()
+        self.acc_label = QLabel("Аккаунтов: 0")  # ✅ ДОБАВЛЕНО
+        self.acc_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #3498db;")
+        self.acc_display = QLabel("Текущий: ---")
+        self.acc_display.setStyleSheet("font-size: 14px; color: #ecf0f1;")
+        acc_group.addWidget(self.acc_label)
+        acc_group.addWidget(self.acc_display)
+    
+        # Статус бота
+        status_group = QVBoxLayout()
+        self.status_label = QLabel("Статус: ⏹️ Остановлен")
+        self.status_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #e74c3c;")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMaximumHeight(25)
+        status_group.addWidget(self.status_label)
+        status_group.addWidget(self.progress_bar)
+    
+        # OCR и версии
+        info_group = QVBoxLayout()
+        ocr_status = "✅ OCR" if self.text_finder.ocr_available else "⚠️ OCR"
+        ocr_color = "#27ae60" if self.text_finder.ocr_available else "#e74c3c"
+        self.ocr_label = QLabel(ocr_status)
+        self.ocr_label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {ocr_color};")
+        self.version_label = QLabel(f"v{VERSION}")
+        self.version_label.setStyleSheet("font-size: 14px; color: #9b59b6;")
+        info_group.addWidget(self.ocr_label)
+        info_group.addWidget(self.version_label)
+    
+        # Кнопки
+        btn_group = QHBoxLayout()
+        self.btn_load_accounts = QPushButton("📂 Загрузить аккаунты")
+        self.btn_load_accounts.setFixedSize(180, 45)
+        self.btn_load_accounts.clicked.connect(self.load_file)
+    
+        self.btn_settings = QPushButton("⚙️ Настройки")
+        self.btn_settings.setFixedSize(120, 45)
         self.btn_settings.clicked.connect(self.open_settings_dialog)
-        top_bar.addWidget(self.btn_settings)
-        main_layout.addLayout(top_bar)
-        top_h = QHBoxLayout()
-        v_left = QVBoxLayout()
-        self.acc_display = QLabel("Аккаунт: ---")
-        self.acc_display.setStyleSheet("font-weight: bold; color: #2980b9;")
-        v_left.addWidget(self.acc_display)
-        v_left.addStretch()
-        top_h.addLayout(v_left)
-        main_layout.addLayout(top_h)
-        self.server_widget = QGroupBox("🖱️ Выбор сервера (Запись зажатия + перетаскивания)")
-        server_layout = QHBoxLayout()
-        self.btn_server_record = QPushButton("Запись выбора сервера")
-        self.btn_server_record.setStyleSheet("background: #e67e22; color: white; height: 40px; font-weight: bold;")
-        self.btn_server_record.clicked.connect(self.start_server_recording)
-        self.chk_use_server = QCheckBox()
-        self.chk_use_server.setChecked(False)
-        self.chk_use_server.setToolTip("Если отмечено, будет выполнен записанный макрос выбора сервера")
-        self.chk_use_server.stateChanged.connect(self.on_server_checkbox_changed)
-        self.lbl_server_status = QLabel("Статус: не записано")
-        self.lbl_server_status.setStyleSheet("color: #e74c3c;")
-        server_layout.addWidget(self.btn_server_record)
-        server_layout.addWidget(self.chk_use_server)
-        server_layout.addWidget(QLabel("Использовать при запуске"))
-        server_layout.addWidget(self.lbl_server_status)
-        server_layout.addStretch()
-        self.server_widget.setLayout(server_layout)
-        main_layout.addWidget(self.server_widget)
-        macro_group = QGroupBox("📜 Редактор макросов")
-        macro_layout = QVBoxLayout()
-        macro_control_h = QHBoxLayout()
+    
+        btn_group.addWidget(self.btn_load_accounts)
+        btn_group.addWidget(self.btn_settings)
+    
+        # Добавление в layout
+        layout.addLayout(acc_group)
+        layout.addStretch()
+        layout.addLayout(status_group)
+        layout.addStretch()
+        layout.addLayout(info_group)
+        layout.addStretch()
+        layout.addLayout(btn_group)
+    
+        return panel
+    
+    def create_center_tabs(self):
+        """Центральная область с вкладками"""
+        tabs = QTabWidget()
+        tabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        # Вкладка 1: Редактор макросов
+        editor_tab = self.create_macro_editor_tab()
+        tabs.addTab(editor_tab, "📜 Редактор Макросов")
+        
+        # Вкладка 2: Выбор сервера
+        server_tab = self.create_server_tab()
+        tabs.addTab(server_tab, "🖱️ Выбор Сервера")
+        
+        # Вкладка 3: Список макросов
+        list_tab = self.create_macro_list_tab()
+        tabs.addTab(list_tab, "📂 Список Макросов")
+        
+        # Вкладка 4: Помощь
+        help_tab = self.create_help_tab()
+        tabs.addTab(help_tab, "💡 Помощь")
+        
+        return tabs
+    
+    def create_macro_editor_tab(self):
+        """Вкладка редактора макросов"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        
+        # Панель имени макроса
+        name_panel = QHBoxLayout()
+        name_panel.addWidget(QLabel("Имя макроса:"))
         self.macro_name_input = QLineEdit()
-        self.macro_name_input.setPlaceholderText("Имя макроса (без .txt)")
-        btn_add_macro = QPushButton("➕ Создать")
-        btn_add_macro.setStyleSheet("background: #3498db; color: white; height: 35px;")
-        btn_add_macro.clicked.connect(self.add_new_macro)
-        btn_load_macro = QPushButton("📂 Загрузить")
-        btn_load_macro.setStyleSheet("background: #9b59b6; color: white; height: 35px;")
-        btn_load_macro.clicked.connect(self.load_macro_from_list)
-        btn_save_macro = QPushButton("💾 Сохранить")
-        btn_save_macro.setStyleSheet("background: #27ae60; color: white; height: 35px;")
-        btn_save_macro.clicked.connect(self.save_current_macro)
-        btn_delete_macro = QPushButton("🗑️ Удалить")
-        btn_delete_macro.setStyleSheet("background: #e74c3c; color: white; height: 35px;")
-        btn_delete_macro.clicked.connect(self.delete_current_macro)
-        macro_control_h.addWidget(QLabel("Имя:    "))
-        macro_control_h.addWidget(self.macro_name_input)
-        macro_control_h.addWidget(btn_add_macro)
-        macro_control_h.addWidget(btn_load_macro)
-        macro_control_h.addWidget(btn_save_macro)
-        macro_control_h.addWidget(btn_delete_macro)
-        macro_layout.addLayout(macro_control_h)
-        self.macro_list_widget = QWidget()
-        macro_list_layout = QVBoxLayout(self.macro_list_widget)
-        macro_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.macro_list = MacroListWidget()
-        self.macro_list.setFixedHeight(100)
-        self.macro_list.itemDoubleClicked.connect(self.on_macro_double_click)
-        self.refresh_macro_list()
-        macro_list_layout.addWidget(QLabel("Доступные макросы (перетаскивайте для изменения порядка, двойной клик для загрузки):"))
-        macro_list_layout.addWidget(self.macro_list)
-        macro_layout.addWidget(self.macro_list_widget)
-        macro_folder_h = QHBoxLayout()
-        self.lbl_macro_folder = QLabel(f"📁 Папка макросов: {self.macro_folder_path}")
-        self.lbl_macro_folder.setStyleSheet("color: #3498db; font-weight: bold;")
-        btn_select_macro_folder = QPushButton("📂 Выбрать папку макросов")
-        btn_select_macro_folder.setStyleSheet("background: #16a085; color: white; height: 30px;")
-        btn_select_macro_folder.clicked.connect(self.select_macro_folder)
-        macro_folder_h.addWidget(self.lbl_macro_folder)
-        macro_folder_h.addWidget(btn_select_macro_folder)
-        macro_folder_h.addStretch()
-        macro_layout.addLayout(macro_folder_h)
-        image_folder_h = QHBoxLayout()
-        self.lbl_image_folder = QLabel(f"📁 Папка изображений: {self.image_finder.get_folder_path()}")
-        self.lbl_image_folder.setStyleSheet("color: #3498db; font-weight: bold;")
-        btn_select_folder = QPushButton("📂 Выбрать папку изображений")
-        btn_select_folder.setStyleSheet("background: #16a085; color: white; height: 30px;")
-        btn_select_folder.clicked.connect(self.select_image_folder)
-        image_folder_h.addWidget(self.lbl_image_folder)
-        image_folder_h.addWidget(btn_select_folder)
-        image_folder_h.addStretch()
-        macro_layout.addLayout(image_folder_h)
-        buttons_h = QHBoxLayout()
-        btn_wait = QPushButton("⏱️ Ожидание")
-        btn_wait.setStyleSheet("background: #f39c12; color: white; height: 35px;")
-        btn_wait.clicked.connect(self.add_wait_command)
-        btn_capture = QPushButton("🎯 Координата")
-        btn_capture.setStyleSheet("background: #e74c3c; color: white; height: 35px;")
-        btn_capture.clicked.connect(self.capture_coordinate)
-        btn_text_search = QPushButton("🔍 Поиск текста")
-        btn_text_search.setStyleSheet("background: #16a085; color: white; height: 35px;")
-        btn_text_search.clicked.connect(self.add_text_search_command)
-        btn_etext_wait = QPushButton("⏳ ETextWait")
-        btn_etext_wait.setStyleSheet("background: #1abc9c; color: white; height: 35px;")
-        btn_etext_wait.clicked.connect(self.add_etext_wait_command)
-        btn_etext_wait.setToolTip('ETextWait(интервал, таймаут, "текст") - ждать текст с опросом')
-        btn_img_wait = QPushButton("⏳ EIMGWait")
-        btn_img_wait.setStyleSheet("background: #3498db; color: white; height: 35px;")
-        btn_img_wait.clicked.connect(self.add_eimg_wait_command)
-        btn_img_wait.setToolTip('EIMGWait(интервал, таймаут, "имя") - ждать изображение с опросом')
-        btn_loop = QPushButton("🔄 Цикл")
-        btn_loop.setStyleSheet("background: #8e44ad; color: white; height: 35px;")
-        btn_loop.clicked.connect(self.add_loop_command)
-        btn_etext = QPushButton("⌨️ EText")
-        btn_etext.setStyleSheet("background: #2ecc71; color: white; height: 35px;")
-        btn_etext.clicked.connect(self.add_etext_command)
-        btn_etext.setToolTip("Ввести текст. Используйте {EMAIL} или {PASSWORD} для данных аккаунта")
-        btn_img = QPushButton("🖼️ IMG")
-        btn_img.setStyleSheet("background: #9b59b6; color: white; height: 35px;")
-        btn_img.clicked.connect(self.add_img_command)
-        btn_img.setToolTip("Поиск изображения (IMG:название). Картинку положить в папку изображений")
-        buttons_h.addWidget(btn_wait)
-        buttons_h.addWidget(btn_capture)
-        buttons_h.addWidget(btn_text_search)
-        buttons_h.addWidget(btn_etext_wait)
-        buttons_h.addWidget(btn_img_wait)
-        buttons_h.addWidget(btn_loop)
-        buttons_h.addWidget(btn_etext)
-        buttons_h.addWidget(btn_img)
-        macro_layout.addLayout(buttons_h)
+        self.macro_name_input.setPlaceholderText("Введите имя макроса (без .txt)")
+        self.macro_name_input.setFixedHeight(40)
+        name_panel.addWidget(self.macro_name_input, stretch=1)
+        
+        # Кнопки управления макросом
+        self.btn_new_macro = QPushButton("➕ Новый")
+        self.btn_new_macro.setFixedSize(100, 40)
+        self.btn_new_macro.clicked.connect(self.add_new_macro)
+        
+        self.btn_load_macro = QPushButton("📂 Загрузить")
+        self.btn_load_macro.setFixedSize(100, 40)
+        self.btn_load_macro.clicked.connect(self.load_macro_from_list)
+        
+        self.btn_save_macro = QPushButton("💾 Сохранить")
+        self.btn_save_macro.setFixedSize(100, 40)
+        self.btn_save_macro.clicked.connect(self.save_current_macro)
+        
+        self.btn_delete_macro = QPushButton("🗑️ Удалить")
+        self.btn_delete_macro.setFixedSize(100, 40)
+        self.btn_delete_macro.clicked.connect(self.delete_current_macro)
+        
+        name_panel.addWidget(self.btn_new_macro)
+        name_panel.addWidget(self.btn_load_macro)
+        name_panel.addWidget(self.btn_save_macro)
+        name_panel.addWidget(self.btn_delete_macro)
+        
+        layout.addLayout(name_panel)
+        
+        # Панель инструментов макроса
+        toolbar = self.create_macro_toolbar()
+        layout.addWidget(toolbar)
+        
+        # Редактор с номерами строк
         self.macro_editor = LineNumberEdit()
         self.macro_editor.setPlaceholderText(
             "# Формат команд:\n"
             "# CLICK:x,y - клик по координатам\n"
             "# WAIT:секунды - ожидание\n"
-            "# TEXT:слово - найти текст через OCR и НАВЕСТИ КУРСОР (без клика!)\n"
-            "# EText:текст - ввести текст с клавиатуры\n"
-            "# EText:{EMAIL} - вставить email текущего аккаунта\n"
-            "# EText:{PASSWORD} - вставить пароль текущего аккаунта\n"
-            '# ETextWait(интервал, таймаут, "текст") - ждать текст с опросом\n'
-            '# EIMGWait(интервал, таймаут, "имя") - ждать изображение с опросом\n'
+            "# TEXT:слово - найти текст через OCR\n"
+            "# EText:текст - ввести текст\n"
+            "# EText:{EMAIL} или {PASSWORD} - данные аккаунта\n"
+            "# ETextWait(интервал, таймаут, \"текст\")\n"
+            "# EIMGWait(интервал, таймаут, \"имя\")\n"
             "# IMG:название - найти изображение и кликнуть\n"
-            "# НАЧАЛО_ЦИКЛА(N) - начало цикла (N=0 для бесконечного)\n"
-            "# КОНЕЦ_ЦИКЛА - конец цикла\n"
+            "# НАЧАЛО_ЦИКЛА(N) / КОНЕЦ_ЦИКЛА\n"
         )
-        self.macro_editor.setStyleSheet("background: #2c3e50; color: #ecf0f1; font-family: Consolas; font-size: 12px;")
         self.macro_editor.cursorPositionChanged.connect(self.save_cursor_position)
-        macro_layout.addWidget(QLabel("Редактор макроса (номера строк соответствуют логу):"))
-        macro_layout.addWidget(self.macro_editor, stretch=1)
-        self.help_widget = QLabel(
-            "💡 Для выбора сервера: запишите действия (зажать ЛКМ + перетащить)\n"
-            "💡 Цикл (0) = бесконечный цикл до F1 или конца аккаунтов\n"
-            "💡 Для IMG: положите картинку (.png/.jpg) в папку изображений\n"
-            "💡 F5 - пауза/продолжение выполнения (макрос продолжится с места остановки)\n"
-            "💡 ETextWait/EIMGWait - ждут появления объекта с интервалом опроса\n"
-            "💡 EText:{EMAIL} или {PASSWORD} - вставит данные текущего аккаунта в макрос\n"
-            "💡 TEXT: - только наводит курсор на текст, НЕ КЛИКАЕТ!"
+        layout.addWidget(self.macro_editor, stretch=1)
+        
+        # Индикатор текущей строки
+        self.line_indicator = QLabel("Текущая строка: -")
+        self.line_indicator.setStyleSheet("color: #e94560; font-weight: bold;")
+        layout.addWidget(self.line_indicator)
+        
+        return widget
+    
+    def create_macro_toolbar(self):
+        """Панель инструментов для добавления команд"""
+        toolbar = QGroupBox("🛠️ Инструменты")
+        layout = QHBoxLayout(toolbar)
+        layout.setSpacing(8)
+        
+        buttons = [
+            ("⏱️ WAIT", self.add_wait_command, "Добавить ожидание"),
+            ("🎯 CLICK", self.capture_coordinate, "Захват координаты"),
+            ("🔍 TEXT", self.add_text_search_command, "Поиск текста"),
+            ("⏳ ETextWait", self.add_etext_wait_command, "Ждать текст"),
+            ("⏳ EIMGWait", self.add_eimg_wait_command, "Ждать изображение"),
+            ("🔄 ЦИКЛ", self.add_loop_command, "Добавить цикл"),
+            ("⌨️ EText", self.add_etext_command, "Ввод текста"),
+            ("🖼️ IMG", self.add_img_command, "Поиск изображения"),
+        ]
+        
+        for text, handler, tooltip in buttons:
+            btn = QPushButton(text)
+            btn.setFixedHeight(35)
+            btn.setToolTip(tooltip)
+            btn.clicked.connect(handler)
+            layout.addWidget(btn)
+        
+        layout.addStretch()
+        return toolbar
+    
+    def create_server_tab(self):
+        """Вкладка выбора сервера"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+    
+        # Статус записи
+        status_box = QGroupBox("📹 Статус Записи")
+        status_layout = QVBoxLayout(status_box)
+    
+        self.lbl_server_status = QLabel("Статус: не записано")
+        self.lbl_server_status.setStyleSheet("font-size: 14px; color: #e74c3c; font-weight: bold;")
+        status_layout.addWidget(self.lbl_server_status)
+    
+        self.server_details = QLabel("")
+        self.server_details.setStyleSheet("color: #95a5a6;")
+        status_layout.addWidget(self.server_details)
+    
+        layout.addWidget(status_box)
+    
+        # Управление записью
+        control_box = QGroupBox("🎮 Управление")
+        control_layout = QHBoxLayout(control_box)
+    
+        self.btn_server_record = QPushButton("🔴 Начать запись (F2)")
+        self.btn_server_record.setFixedHeight(45)
+        self.btn_server_record.setStyleSheet("font-size: 12px; padding: 5px 10px;")
+        self.btn_server_record.clicked.connect(self.start_server_recording)
+    
+        self.btn_server_stop = QPushButton("⏹️ Остановить запись")
+        self.btn_server_stop.setFixedHeight(45)
+        self.btn_server_stop.setStyleSheet("font-size: 12px; padding: 5px 10px;")
+        self.btn_server_stop.clicked.connect(self.stop_server_recording)
+        self.btn_server_stop.setEnabled(False)
+    
+        self.chk_use_server = QCheckBox("Использовать при запуске")
+        self.chk_use_server.setStyleSheet("font-size: 12px; spacing: 5px;")
+        self.chk_use_server.stateChanged.connect(self.on_server_checkbox_changed)
+    
+        control_layout.addWidget(self.btn_server_record)
+        control_layout.addWidget(self.btn_server_stop)
+        control_layout.addStretch()
+        control_layout.addWidget(self.chk_use_server)
+    
+        layout.addWidget(control_box)
+    
+        # Инструкция
+        info_box = QGroupBox("📖 Инструкция")
+        info_layout = QVBoxLayout(info_box)
+        instructions = QLabel(
+            "1. Нажмите 'Начать запись'\n"
+            "2. Зажмите ЛКМ в начальной точке списка серверов\n"
+            "3. Перетащите курсор до нужного сервера\n"
+            "4. Отпустите ЛКМ\n"
+            "5. Нажмите 'Остановить запись' или F2\n"
+            "6. Включите 'Использовать при запуске бота'"
         )
-        self.help_widget.setStyleSheet("color: #f39c12; font-weight: bold;")
-        macro_layout.addWidget(self.help_widget)
-        macro_group.setLayout(macro_layout)
-        main_layout.addWidget(macro_group, stretch=1)
-        self.log_widget = QWidget()
-        log_layout = QVBoxLayout(self.log_widget)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        self.log = QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setStyleSheet("background: #2c3e50; color: #ecf0f1; font-family: Consolas;")
-        self.log.setFixedHeight(200)
-        self.log.verticalScrollBar().valueChanged.connect(
-            lambda: self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("color: #ecf0f1; line-height: 1.6; font-size: 11px;")
+        info_layout.addWidget(instructions)
+    
+        layout.addWidget(info_box)
+        layout.addStretch()
+    
+        # СОХРАНЯЕМ КАК АТРИБУТ
+        self.server_widget = widget
+        return widget
+    
+    def create_macro_list_tab(self):
+        """Вкладка списка макросов"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+    
+        # Панель папок
+        folder_panel = QHBoxLayout()
+        self.lbl_macro_folder = QLabel(f"📁 Папка макросов:")
+        self.lbl_macro_folder.setStyleSheet("font-weight: bold; font-size: 11px;")
+    
+        self.btn_select_macro_folder = QPushButton("📂 Выбрать")
+        self.btn_select_macro_folder.setFixedHeight(30)
+        self.btn_select_macro_folder.setMaximumWidth(100)
+        self.btn_select_macro_folder.setStyleSheet("font-size: 11px; padding: 3px 8px;")
+        self.btn_select_macro_folder.clicked.connect(self.select_macro_folder)
+    
+        self.lbl_image_folder = QLabel(f"🖼️ Папка изображений:")
+        self.lbl_image_folder.setStyleSheet("font-weight: bold; font-size: 11px;")
+    
+        self.btn_select_image_folder = QPushButton("📂 Выбрать")
+        self.btn_select_image_folder.setFixedHeight(30)
+        self.btn_select_image_folder.setMaximumWidth(100)
+        self.btn_select_image_folder.setStyleSheet("font-size: 11px; padding: 3px 8px;")
+        self.btn_select_image_folder.clicked.connect(self.select_image_folder)
+    
+        folder_panel.addWidget(self.lbl_macro_folder)
+        folder_panel.addWidget(self.btn_select_macro_folder)
+        folder_panel.addStretch()
+        folder_panel.addWidget(self.lbl_image_folder)
+        folder_panel.addWidget(self.btn_select_image_folder)
+    
+        layout.addLayout(folder_panel)
+    
+        # Список макросов
+        list_box = QGroupBox("📋 Доступные макросы")
+        list_layout = QVBoxLayout(list_box)
+    
+        self.macro_list = MacroListWidget()
+        self.macro_list.setMinimumHeight(300)
+        self.macro_list.itemDoubleClicked.connect(self.on_macro_double_click)
+        self.refresh_macro_list()
+    
+        list_layout.addWidget(self.macro_list)
+    
+        layout.addWidget(list_box)
+    
+        # СОХРАНЯЕМ КАК АТРИБУТ
+        self.macro_list_widget = widget
+        return widget
+    
+    def create_help_tab(self):
+        """Вкладка помощи"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(15)
+    
+        help_box = QGroupBox("📖 Справка по командам")
+        help_layout = QVBoxLayout(help_box)
+    
+        help_text = QLabel(
+            "<h3 style='color: #e94560; font-size: 14px;'>Команды макросов:</h3>"
+            "<table style='color: #ecf0f1; line-height: 1.8; font-size: 11px;'>"
+            "<tr><td><b>CLICK:x,y</b></td><td>Клик по относительным координатам (0-1)</td></tr>"
+            "<tr><td><b>WAIT:сек</b></td><td>Ожидание указанное время</td></tr>"
+            "<tr><td><b>TEXT:слово</b></td><td>Найти текст и навести курсор</td></tr>"
+            "<tr><td><b>EText:текст</b></td><td>Ввести текст с клавиатуры</td></tr>"
+            "<tr><td><b>EText:{EMAIL}</b></td><td>Вставить email текущего аккаунта</td></tr>"
+            "<tr><td><b>EText:{PASSWORD}</b></td><td>Вставить пароль текущего аккаунта</td></tr>"
+            "<tr><td><b>ETextWait(инт, тайм, \"текст\")</b></td><td>Ждать появления текста</td></tr>"
+            "<tr><td><b>EIMGWait(инт, тайм, \"имя\")</b></td><td>Ждать появления изображения</td></tr>"
+            "<tr><td><b>IMG:название</b></td><td>Найти изображение и кликнуть</td></tr>"
+            "<tr><td><b>НАЧАЛО_ЦИКЛА(N)</b></td><td>Начало цикла (0=бесконечный)</td></tr>"
+            "<tr><td><b>КОНЕЦ_ЦИКЛА</b></td><td>Конец цикла</td></tr>"
+            "</table>"
+            "<h3 style='color: #3498db; margin-top: 15px; font-size: 14px;'>Горячие клавиши:</h3>"
+            "<ul style='color: #ecf0f1; line-height: 1.8; font-size: 11px;'>"
+            "<li><b>F1</b> - Экстренная остановка</li>"
+            "<li><b>F2</b> - Запись выбора сервера (вкл/выкл)</li>"
+            "<li><b>F3</b> - Запуск бота</li>"
+            "<li><b>F4</b> - Запуск только макроса</li>"
+            "<li><b>F5</b> - Пауза/Продолжение</li>"
+            "</ul>"
         )
-        log_layout.addWidget(QLabel("📋 Лог (номера строк соответствуют редактору):"))
-        log_layout.addWidget(self.log)
-        main_layout.addWidget(self.log_widget)
+        help_text.setWordWrap(True)
+        help_text.setTextFormat(Qt.TextFormat.RichText)
+        help_layout.addWidget(help_text)
+    
+        layout.addWidget(help_box)
+    
+        # СОХРАНЯЕМ КАК АТРИБУТ
+        self.help_widget = widget
+        return widget
+    
+    def create_bottom_control_panel(self):
+        """Нижняя панель с кнопками управления и логом"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(15)
+    
+        # Кнопки управления
         btn_layout = QHBoxLayout()
-        self.btn_run = QPushButton("🚀 ЗАПУСТИТЬ (F3)")
-        self.btn_run.setStyleSheet("background: #27ae60; color: white; height: 60px; font-weight: bold; font-size: 14px;")
+        btn_layout.setSpacing(15)
+    
+        self.btn_run = QPushButton("🚀 ЗАПУСТИТЬ БОТА (F3)")
+        self.btn_run.setFixedHeight(60)
+        self.btn_run.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+            QPushButton:disabled {
+                background-color: #34495e;
+            }
+        """)
         self.btn_run.clicked.connect(self.start_bot)
-        self.btn_macro_only = QPushButton("📜 ЗАПУСТИТЬ ТОЛЬКО МАКРОС (F4)")
-        self.btn_macro_only.setStyleSheet("background: #8e44ad; color: white; height: 60px; font-weight: bold; font-size: 14px;")
+    
+        self.btn_macro_only = QPushButton("📜 ТОЛЬКО МАКРОС (F4)")
+        self.btn_macro_only.setFixedHeight(60)
+        self.btn_macro_only.setStyleSheet("""
+            QPushButton {
+                background-color: #8e44ad;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #9b59b6;
+            }
+            QPushButton:disabled {
+                background-color: #34495e;
+            }
+        """)
         self.btn_macro_only.clicked.connect(self.start_macro_only)
+    
         self.btn_pause = QPushButton("⏸️ ПАУЗА (F5)")
-        self.btn_pause.setStyleSheet("background: #f39c12; color: white; height: 60px; font-weight: bold; font-size: 14px;")
+        self.btn_pause.setFixedHeight(60)
+        self.btn_pause.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #f1c40f;
+            }
+            QPushButton:disabled {
+                background-color: #34495e;
+            }
+        """)
         self.btn_pause.clicked.connect(self.toggle_pause)
         self.btn_pause.setEnabled(False)
+    
+        self.btn_stop = QPushButton("⛔ СТОП (F1)")
+        self.btn_stop.setFixedHeight(60)
+        self.btn_stop.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        self.btn_stop.clicked.connect(self.emergency_stop)
+    
         btn_layout.addWidget(self.btn_run)
         btn_layout.addWidget(self.btn_macro_only)
         btn_layout.addWidget(self.btn_pause)
-        main_layout.addLayout(btn_layout)
-        self.stack.addWidget(self.page2)
+        btn_layout.addWidget(self.btn_stop)
+    
+        layout.addLayout(btn_layout)
+    
+        # Лог событий - СОХРАНЯЕМ КАК АТРИБУТ
+        self.log_widget = QGroupBox("📋 Лог Событий")
+        log_layout = QVBoxLayout(self.log_widget)
+    
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(200)
+        self.log.verticalScrollBar().valueChanged.connect(
+            lambda: self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+        )
+    
+        log_layout.addWidget(self.log)
+    
+        # Кнопки лога
+        log_btn_layout = QHBoxLayout()
+        self.btn_clear_log = QPushButton("🗑️ Очистить")
+        self.btn_clear_log.setFixedHeight(30)
+        self.btn_clear_log.setMaximumWidth(120)
+        self.btn_clear_log.clicked.connect(lambda: self.log.clear())
+    
+        self.btn_save_log = QPushButton("💾 Сохранить")
+        self.btn_save_log.setFixedHeight(30)
+        self.btn_save_log.setMaximumWidth(120)
+        self.btn_save_log.clicked.connect(self.save_log)
+    
+        log_btn_layout.addWidget(self.btn_clear_log)
+        log_btn_layout.addWidget(self.btn_save_log)
+        log_btn_layout.addStretch()
+    
+        log_layout.addLayout(log_btn_layout)
+        layout.addWidget(self.log_widget)
+    
+        return panel
+    def append_to_log(self, message, log_type='info'):
+        """Добавление сообщения в лог с цветом"""
+        try:
+            if self.log:
+                color = LOG_COLORS.get(log_type, LOG_COLORS['info'])
+                
+                # Форматирование сообщения
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                formatted_msg = f"<span style='color: #7f8c8d;'>[{timestamp}]</span> <span style='color: {color};'>{message}</span>"
+                
+                self.log.append(formatted_msg)
+                
+                # Автопрокрутка
+                scrollbar = self.log.verticalScrollBar()
+                scrollbar.setValue(scrollbar.maximum())
+                
+                # Подсветка текущей строки в редакторе
+                if self.worker and hasattr(self.worker, 'current_line'):
+                    if self.macro_editor:
+                        self.macro_editor.highlight_current_line(self.worker.current_line)
+                        self.line_indicator.setText(f"Текущая строка: {self.worker.current_line}")
+                        
+        except Exception as e:
+            print(f"Ошибка добавления в лог: {e}")
+    
+    def save_log(self):
+        """Сохранение лога в файл"""
+        try:
+            filepath, _ = QFileDialog.getSaveFileName(
+                self, "Сохранить лог", 
+                f"bot_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                "Текстовые файлы (*.txt)"
+            )
+            if filepath:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(self.log.toPlainText())
+                self.append_to_log(f"✅ Лог сохранён: {filepath}", 'success')
+        except Exception as e:
+            self.append_to_log(f"❌ Ошибка сохранения лога: {e}", 'error')
+            
+    def update_bot_status(self, running=False, paused=False):
+        """Обновление статуса бота"""
+        if running:
+            if paused:
+                self.status_label.setText("Статус: ⏸️ На паузе")
+                self.status_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #f39c12;")
+                self.btn_pause.setText("▶️ ПРОДОЛЖИТЬ (F5)")
+            else:
+                self.status_label.setText("Статус: ▶️ Выполняется")
+                self.status_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #27ae60;")
+                self.btn_pause.setText("⏸️ ПАУЗА (F5)")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setFormat("Выполнение...")
+        else:
+            self.status_label.setText("Статус: ⏹️ Остановлен")
+            self.status_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #e74c3c;")
+            self.btn_pause.setText("⏸️ ПАУЗА (F5)")
+            self.progress_bar.setVisible(False)
+        
+        self.btn_run.setEnabled(not running)
+        self.btn_macro_only.setEnabled(not running)
+        self.btn_pause.setEnabled(running)
+    
+    def update_account_display(self, email):
+        """Обновление отображения текущего аккаунта"""
+        self.acc_display.setText(f"Текущий: {email}")
+        self.append_to_log(f"👤 Аккаунт: {email}", 'process')        
     
     def select_macro_folder(self):
         try:
@@ -2108,47 +2700,19 @@ class InfiniteBotApp(QMainWindow):
             self.append_to_log(f"❌ Ошибка переключения записи: {e}")
     
     def open_settings_dialog(self):
+        """✅ Открытие диалога настроек"""
         try:
             dialog = VisibilitySettingsDialog(self)
             dialog.load_settings(self.visibility_settings)
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                self.visibility_settings = dialog.get_settings()
-                self.apply_visibility_settings()
-                self.apply_window_size_settings()
+                settings = dialog.get_settings()
+                self.visibility_settings['window_width'] = settings['window_width']
+                self.visibility_settings['window_height'] = settings['window_height']
+                self.resize(settings['window_width'], settings['window_height'])
                 self.save_config()
                 self.append_to_log("⚙️ Настройки сохранены")
         except Exception as e:
             self.append_to_log(f"❌ Ошибка открытия настроек: {e}")
-    
-    def apply_visibility_settings(self):
-        try:
-            widgets_visibility = [
-                (self.log_widget, 'show_log'),
-                (self.server_widget, 'show_server'),
-                (self.macro_list_widget, 'show_macro_list'),
-                (self.help_widget, 'show_help'),
-            ]
-            for widget, setting in widgets_visibility:
-                if widget:
-                    widget.setVisible(self.visibility_settings.get(setting, True))
-        except Exception as e:
-            self.append_to_log(f"❌ Ошибка применения видимости: {e}")
-    
-    def apply_window_size_settings(self):
-        try:
-            if self.visibility_settings.get('resizable_window', False):
-                self.setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
-                self.setMinimumSize(800, 600)
-                width = self.visibility_settings.get('window_width', 1100)
-                height = self.visibility_settings.get('window_height', 1100)
-                self.resize(max(800, width), max(600, height))
-                self.append_to_log(f"📐 Окно сделано изменяемым. Размер: {max(800, width)}x{max(600, height)}")
-            else:
-                self.setFixedSize(1100, 1100)
-                self.setMinimumSize(800, 600)
-                self.append_to_log("📐 Окно зафиксировано в размере 1100x1100")
-        except Exception as e:
-            self.append_to_log(f"❌ Ошибка применения размера окна: {e}")
     
     def go_back_to_page1(self):
         try:
@@ -2349,72 +2913,94 @@ class InfiniteBotApp(QMainWindow):
     
     def load_config(self):
         try:
-            # ✅ Путь к конфигу через program_path
             config_file = program_path("macros", "config.json")
-        
             if config_file.exists():
                 with open(config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
             
-                # ✅ Исправляем пути: убираем пробелы в ключах и значениях
-                config = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in config.items()}
+                # ✅ Исправляем ключи (убираем пробелы)
+                config = {k.strip(): v for k, v in config.items()}
             
-                accounts_path = config.get('accounts_file')
+                # ✅ Загрузка аккаунтов
+                accounts_path = config.get('accounts_file', '').strip()
                 if accounts_path and os.path.exists(accounts_path):
                     self.accounts_file_path = accounts_path
-                    self.path_label.setText(accounts_path)
                     with open(accounts_path, 'r', encoding='utf-8') as f:
                         self.accounts = [l.strip() for l in f if l.strip()]
-                    self.count_label.setText(f"Аккаунтов: {len(self.accounts)}")
+                    # ✅ Используем acc_label вместо count_label
+                    if hasattr(self, 'acc_label'):
+                        self.acc_label.setText(f"Аккаунтов: {len(self.accounts)}")
+                    self.append_to_log(f"✅ Загружено аккаунтов: {len(self.accounts)}")
             
-                macro_folder = config.get('macro_folder')
+                # ✅ Загрузка папки макросов
+                macro_folder = config.get('macro_folder', '').strip()
                 if macro_folder and os.path.exists(macro_folder):
                     self.macro_folder_path = Path(macro_folder)
                     self.server_macro_path = self.macro_folder_path / "server_selection.txt"
                     self.config_path = program_path("macros", "config.json")
-                    self.lbl_macro_folder.setText(f"📁 Папка макросов: {self.macro_folder_path}")
-                    self.append_to_log(f"Загружена папка макросов: {self.macro_folder_path}")
+                    if hasattr(self, 'lbl_macro_folder'):
+                        self.lbl_macro_folder.setText(f"📁 Папка макросов: {self.macro_folder_path}")
+            
+                # ✅ Загрузка настройки сервера
                 if config.get('use_server_selection', False):
                     if self.server_macro_path.exists():
-                        self.chk_use_server.setChecked(True)
+                        if hasattr(self, 'chk_use_server'):
+                            self.chk_use_server.setChecked(True)
                         events = self.server_recorder.load_server_macro(self.server_macro_path)
                         if events:
                             self.server_recorder.events = events
                             down_count = sum(1 for e in events if e['type'] == 'MOUSE_DOWN')
                             drag_count = sum(1 for e in events if e['type'] == 'MOUSE_DRAG')
                             up_count = sum(1 for e in events if e['type'] == 'MOUSE_UP')
-                            self.lbl_server_status.setText(f"Статус: записано ({down_count} нажатий, {drag_count} перетаскиваний, {up_count} отпусканий)")
-                            self.lbl_server_status.setStyleSheet("color: #27ae60;")
-                            self.append_to_log("Загружена последняя запись выбора сервера")
-                image_folder = config.get('image_folder', None)
-                if image_folder and os.path.exists(image_folder.strip() if isinstance(image_folder, str) else image_folder):
-                    self.image_finder.set_custom_folder(image_folder.strip() if isinstance(image_folder, str) else image_folder)
-                    self.lbl_image_folder.setText(f"📁 Папка изображений: {image_folder}")
-                    self.append_to_log(f"Загружена папка изображений: {image_folder}")
+                            if hasattr(self, 'lbl_server_status'):
+                                self.lbl_server_status.setText(f"Статус: записано ({down_count} нажатий, {drag_count} перетаскиваний, {up_count} отпусканий)")
+                                self.lbl_server_status.setStyleSheet("color: #27ae60;")
+            
+                # ✅ Загрузка папки изображений
+                image_folder = config.get('image_folder', '').strip()
+                if image_folder and os.path.exists(image_folder):
+                    self.image_finder.set_custom_folder(image_folder)
+                    if hasattr(self, 'lbl_image_folder'):
+                        self.lbl_image_folder.setText(f"📁 Папка изображений: {image_folder}")
+            
+                # ✅ Загрузка размера окна
                 if 'visibility_settings' in config:
-                    self.visibility_settings = config.get('visibility_settings', self.visibility_settings)
-                    self.apply_visibility_settings()
-                    self.apply_window_size_settings()
-                self.append_to_log("Конфигурация загружена")
+                    saved_settings = config.get('visibility_settings', {})
+                    self.visibility_settings['window_width'] = saved_settings.get('window_width', 1400)
+                    self.visibility_settings['window_height'] = saved_settings.get('window_height', 900)
+                    self.resize(self.visibility_settings['window_width'], self.visibility_settings['window_height'])
+            
+                self.append_to_log("✅ Конфигурация загружена")
+            
         except Exception as e:
-            self.append_to_log(f"Ошибка загрузки конфигурации: {e}")
+            self.append_to_log(f"❌ Ошибка загрузки конфигурации: {e}")
+            print(f"Debug: {e}")
     
     def save_config(self):
+        """✅ Сохранение конфигурации"""
         try:
             config_file = program_path("macros", "config.json")
             config_file.parent.mkdir(parents=True, exist_ok=True)
         
+            # Обновляем размеры из текущего окна
+            self.visibility_settings['window_width'] = self.width()
+            self.visibility_settings['window_height'] = self.height()
+        
             config = {
                 'accounts_file': self.accounts_file_path,
                 'macro_folder': str(self.macro_folder_path.absolute()),
-                'use_server_selection': self.chk_use_server.isChecked(),
-                'last_macro': self.macro_name_input.text().strip() + '.txt' if self.macro_name_input.text().strip() else None,
-                'visibility_settings': self.visibility_settings,
+                'use_server_selection': self.chk_use_server.isChecked() if hasattr(self, 'chk_use_server') else False,
+                'last_macro': self.macro_name_input.text().strip() + '.txt' if hasattr(self, 'macro_name_input') and self.macro_name_input.text().strip() else None,
+                'visibility_settings': {
+                    'window_width': self.visibility_settings['window_width'],
+                    'window_height': self.visibility_settings['window_height']
+                },
                 'image_folder': self.image_finder.get_folder_path()
             }
         
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
+        
             print(f"✅ Конфиг сохранён: {config_file}")
         except Exception as e:
             print(f"❌ Ошибка сохранения конфигурации: {e}")
@@ -2831,28 +3417,50 @@ class InfiniteBotApp(QMainWindow):
         if self.is_bot_running:
             QMessageBox.warning(self, "Внимание", "Бот уже запущен!")
             return
+    
         if self.chk_use_server.isChecked():
             if not self.server_recorder.is_recorded() and not self.server_macro_path.exists():
                 QMessageBox.warning(self, "Ошибка", "Сначала выполните запись выбора сервера!")
                 return
+    
         if not self.accounts:
             QMessageBox.warning(self, "Внимание", "Загрузите файл с аккаунтами!")
             return
+    
         self.cleanup_worker()
+    
         active_macro = self.macro_editor.toPlainText() if self.macro_editor else ""
         if not active_macro.strip():
-            reply = QMessageBox.question(self, "Макрос пуст", "Редактор макросов пуст! Запустить только авторизацию?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            reply = QMessageBox.question(self, "Макрос пуст", 
+                "Редактор макросов пуст! Запустить только авторизацию?", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.No:
                 return
+    
         self.is_bot_running = True
+    
+        # ✅ ДОБАВЛЕНО: Обновление статуса
+        self.update_bot_status(running=True)
+    
         self.btn_run.setEnabled(False)
         self.btn_macro_only.setEnabled(False)
         self.btn_pause.setEnabled(True)
+    
         self.thread = QThread()
         use_server_selection = self.chk_use_server.isChecked() if hasattr(self, 'chk_use_server') else False
+    
         if use_server_selection:
             self.append_to_log("🔹 Выбор сервера будет выполнен (по записанному макросу)")
-        self.worker = BotWorker(self.accounts, active_macro=active_macro, run_macro_only=False, use_server_selection=use_server_selection, server_macro_path=str(self.server_macro_path) if use_server_selection else None, image_folder_path=self.image_finder.get_folder_path())
+    
+        self.worker = BotWorker(
+            self.accounts, 
+            active_macro=active_macro, 
+            run_macro_only=False, 
+            use_server_selection=use_server_selection, 
+            server_macro_path=str(self.server_macro_path) if use_server_selection else None, 
+            image_folder_path=self.image_finder.get_folder_path()
+        )
+    
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.log_msg.connect(self.append_to_log)
@@ -2865,17 +3473,34 @@ class InfiniteBotApp(QMainWindow):
         if self.is_bot_running:
             QMessageBox.warning(self, "Внимание", "Бот уже запущен!")
             return
+    
         self.cleanup_worker()
+    
         active_macro = self.macro_editor.toPlainText() if self.macro_editor else ""
         if not active_macro.strip():
-            QMessageBox.warning(self, "Внимание", "Редактор макросов пуст!\nЗагрузите или создайте макрос.")
+            QMessageBox.warning(self, "Внимание", 
+                "Редактор макросов пуст!\nЗагрузите или создайте макрос.")
             return
+    
         self.is_bot_running = True
+    
+        # ✅ ДОБАВЛЕНО: Обновление статуса
+        self.update_bot_status(running=True)
+    
         self.btn_run.setEnabled(False)
         self.btn_macro_only.setEnabled(False)
         self.btn_pause.setEnabled(True)
+    
         self.thread = QThread()
-        self.worker = BotWorker(self.accounts, active_macro=active_macro, run_macro_only=True, use_server_selection=False, server_macro_path=None, image_folder_path=self.image_finder.get_folder_path())
+        self.worker = BotWorker(
+            self.accounts, 
+            active_macro=active_macro, 
+            run_macro_only=True, 
+            use_server_selection=False, 
+            server_macro_path=None, 
+            image_folder_path=self.image_finder.get_folder_path()
+        )
+    
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.log_msg.connect(self.append_to_log)
@@ -2887,7 +3512,12 @@ class InfiniteBotApp(QMainWindow):
     def bot_finished(self, msg):
         if not self.is_bot_running:
             return
+    
         self.append_to_log(f"\n{msg}")
+    
+        # ✅ ДОБАВЛЕНО: Обновление статуса
+        self.update_bot_status(running=False)
+    
         self.btn_run.setEnabled(True)
         self.btn_macro_only.setEnabled(True)
         self.btn_pause.setEnabled(False)
@@ -2899,6 +3529,7 @@ class InfiniteBotApp(QMainWindow):
     def emergency_stop(self):
         try:
             self.append_to_log("\n<b style='color:red;'>⛔ СТОП (F1) - Экстренная остановка</b>")
+        
             if self.worker:
                 try:
                     self.worker.running = False
@@ -2906,11 +3537,16 @@ class InfiniteBotApp(QMainWindow):
                     self.worker.pause_event.set()
                 except Exception as e:
                     self.append_to_log(f"⚠️ Ошибка остановки воркера: {e}")
+        
             self.is_bot_running = False
             self.is_capturing = False
             self.is_recording_server = False
             self.is_macro_operation = False
             self.is_loading_file = False
+        
+            # ✅ ДОБАВЛЕНО: Обновление статуса
+            self.update_bot_status(running=False)
+        
             try:
                 self.btn_run.setEnabled(True)
                 self.btn_macro_only.setEnabled(True)
@@ -2919,23 +3555,28 @@ class InfiniteBotApp(QMainWindow):
                 self.btn_pause.setStyleSheet("background: #f39c12; color: white; height: 60px; font-weight: bold; font-size: 14px;")
             except Exception as e:
                 self.append_to_log(f"⚠️ Ошибка восстановления кнопок: {e}")
+        
             try:
                 if self.macro_editor:
                     self.macro_editor.setExtraSelections([])
             except Exception as e:
                 self.append_to_log(f"⚠️ Ошибка очистки подсветки: {e}")
+        
             try:
                 if self.thread and self.thread.isRunning():
                     self.thread.quit()
                     self.thread.wait(2000)
             except Exception as e:
                 self.append_to_log(f"⚠️ Ошибка остановки потока: {e}")
+        
             self.append_to_log("<b style='color:red;'>✅ Выполнение остановлено</b>")
+        
         except Exception as e:
             print(f"❌ КРИТИЧЕСКАЯ ОШИБКА в emergency_stop: {e}")
             print(traceback.format_exc())
             try:
                 self.is_bot_running = False
+                self.update_bot_status(running=False)
                 self.btn_run.setEnabled(True)
                 self.btn_macro_only.setEnabled(True)
                 self.btn_pause.setEnabled(False)
@@ -2979,5 +3620,7 @@ if __name__ == "__main__":
         print(f"❌ Критическая ошибка запуска: {e}")
         print(traceback.format_exc())
         sys.exit(1)
+
+
 
 
