@@ -54,8 +54,8 @@ VERSION = "0.03"
 # ============================================
 class UpdateChecker:
     # ✅ GitHub Raw URLs
-    UPDATE_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/IMRBOT.py"
-    VERSION_URL = "https://raw.githubusercontent.com/diablogolod1/IMRBOTPUBLICK/main/macros/version_info.json"
+    UPDATE_URL = "https://github.com/diablogolod1/IMRBOTPUBLICK/blob/main/IMRBOT.py"
+    VERSION_URL = "https://github.com/diablogolod1/IMRBOTPUBLICK/blob/main//macros/version_info.json"
     
     # ✅ Пути относительно папки программы (а не system32!)
     VERSION_FILE = program_path("macros", "version_info.json")
